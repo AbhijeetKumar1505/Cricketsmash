@@ -1,0 +1,35 @@
+{
+  "name": "@cricket-crash/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@cricket-crash/fairness": "workspace:*",
+    "@cricket-crash/sdk-wrapper": "workspace:*",
+    "@cricket-crash/types": "workspace:*",
+    "gsap": "^3.14.2",
+    "js-sha256": "^0.11.0",
+    "pixi.js": "^8.6.6",
+    "stake-engine": "^0.1.32",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/postcss": "^4.2.2",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/three": "^0.183.1",
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.10",
+    "svelte": "^5.16.0",
+    "svelte-check": "^4.1.1",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  }
+}

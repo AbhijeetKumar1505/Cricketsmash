@@ -1,0 +1,248 @@
+<html class="dark"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&amp;family=Space+Grotesk:wght@300..700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+                  "tertiary-fixed": "#ffdf9f",
+                  "on-secondary-container": "#00311f",
+                  "inverse-on-surface": "#283044",
+                  "surface-container-highest": "#2d3449",
+                  "secondary-fixed-dim": "#4edea3",
+                  "outline": "#958ea0",
+                  "on-error-container": "#ffdad6",
+                  "surface-container-low": "#131b2e",
+                  "on-secondary-fixed": "#002113",
+                  "surface-tint": "#d0bcff",
+                  "surface-variant": "#2d3449",
+                  "surface": "#0b1326",
+                  "on-primary-fixed-variant": "#5516be",
+                  "on-background": "#dae2fd",
+                  "on-secondary-fixed-variant": "#005236",
+                  "secondary-fixed": "#6ffbbe",
+                  "surface-container-high": "#222a3d",
+                  "tertiary": "#f9bd22",
+                  "primary": "#d0bcff",
+                  "outline-variant": "#494454",
+                  "error-container": "#93000a",
+                  "tertiary-container": "#b88900",
+                  "surface-bright": "#31394d",
+                  "secondary-container": "#00a572",
+                  "on-secondary": "#003824",
+                  "on-tertiary-fixed-variant": "#5c4300",
+                  "on-primary": "#3c0091",
+                  "surface-dim": "#0b1326",
+                  "error": "#ffb4ab",
+                  "on-tertiary-container": "#372700",
+                  "primary-fixed-dim": "#d0bcff",
+                  "inverse-primary": "#6d3bd7",
+                  "surface-container-lowest": "#060e20",
+                  "on-surface": "#dae2fd",
+                  "on-error": "#690005",
+                  "primary-container": "#a078ff",
+                  "secondary": "#4edea3",
+                  "tertiary-fixed-dim": "#f9bd22",
+                  "on-surface-variant": "#cbc3d7",
+                  "background": "#0b1326",
+                  "surface-container": "#171f33",
+                  "inverse-surface": "#dae2fd",
+                  "primary-fixed": "#e9ddff",
+                  "on-primary-fixed": "#23005c",
+                  "on-primary-container": "#340080",
+                  "on-tertiary-fixed": "#261a00",
+                  "on-tertiary": "#402d00"
+          },
+          "borderRadius": {
+                  "DEFAULT": "0.125rem",
+                  "lg": "0.25rem",
+                  "xl": "0.5rem",
+                  "full": "0.75rem"
+          },
+          "fontFamily": {
+                  "headline": ["Inter"],
+                  "body": ["Inter"],
+                  "label": ["Space Grotesk"]
+          }
+        },
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    .crt-overlay {
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+      background-size: 100% 4px, 3px 100%;
+      pointer-events: none;
+    }
+    .ruby-glow {
+      text-shadow: 0 0 20px #f43f5e, 0 0 40px #f43f5e;
+    }
+    .desaturated-bg {
+      filter: grayscale(0.9) brightness(0.4);
+    }
+    .intensity-gradient {
+      background: radial-gradient(circle at center, #f43f5e33 0%, transparent 70%);
+    }
+  </style>
+</head>
+<body class="bg-surface text-on-surface font-body overflow-hidden">
+<!-- Shell: SideNavBar (As specified in JSON) -->
+<aside class="hidden md:flex flex-col h-full pt-20 bg-[#2d3449]/60 backdrop-blur-xl saturate-[180%] h-screen w-80 fixed left-0 top-0 z-40">
+<div class="absolute right-0 w-[1px] h-full bg-gradient-to-b from-[#494454]/20 via-transparent to-[#494454]/20"></div>
+<div class="px-8 mb-8">
+<h3 class="font-['Space_Grotesk'] font-bold text-xs uppercase text-[#4edea3] tracking-widest">STADIUM FEED</h3>
+<p class="text-[10px] text-on-surface-variant/60">1,248 Players Online</p>
+</div>
+<nav class="flex flex-col gap-1">
+<div class="flex items-center gap-4 px-8 py-4 transition-all cursor-pointer text-[#cbc3d7]/70 hover:text-[#cbc3d7] hover:bg-white/5">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-['Space_Grotesk'] font-bold text-xs uppercase">Live Bets</span>
+</div>
+<div class="flex items-center gap-4 px-8 py-4 transition-all cursor-pointer text-[#cbc3d7]/70 hover:text-[#cbc3d7] hover:bg-white/5">
+<span class="material-symbols-outlined">history</span>
+<span class="font-['Space_Grotesk'] font-bold text-xs uppercase">My Bets</span>
+</div>
+<div class="flex items-center gap-4 px-8 py-4 transition-all cursor-pointer text-[#cbc3d7]/70 hover:text-[#cbc3d7] hover:bg-white/5">
+<span class="material-symbols-outlined">workspace_premium</span>
+<span class="font-['Space_Grotesk'] font-bold text-xs uppercase">High Rollers</span>
+</div>
+<div class="flex items-center gap-4 px-8 py-4 transition-all cursor-pointer text-[#cbc3d7]/70 hover:text-[#cbc3d7] hover:bg-white/5">
+<span class="material-symbols-outlined">military_tech</span>
+<span class="font-['Space_Grotesk'] font-bold text-xs uppercase">Daily Race</span>
+</div>
+<div class="flex items-center gap-4 px-8 py-4 transition-all cursor-pointer bg-gradient-to-r from-[#4edea3]/20 to-transparent text-[#4edea3] border-l-4 border-[#4edea3]">
+<span class="material-symbols-outlined">update</span>
+<span class="font-['Space_Grotesk'] font-bold text-xs uppercase">History</span>
+</div>
+</nav>
+</aside>
+<!-- Shell: TopAppBar (As specified in JSON) -->
+<header class="flex justify-between items-center w-full px-6 py-4 sticky top-0 z-50 bg-[#0b1326]/60 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
+<div class="absolute bottom-0 left-0 bg-gradient-to-r from-transparent via-[#494454]/20 to-transparent h-[1px] w-full"></div>
+<div class="text-2xl font-black text-[#d0bcff] drop-shadow-[0_0_15px_rgba(208,188,255,0.8)] font-['Inter'] uppercase tracking-tighter">
+      CRICKET CRASH
+    </div>
+<nav class="hidden md:flex gap-8">
+<a class="text-[#cbc3d7] font-medium hover:text-[#4edea3] transition-colors duration-300" href="#">Lobby</a>
+<a class="text-[#cbc3d7] font-medium hover:text-[#4edea3] transition-colors duration-300" href="#">Live Stats</a>
+<a class="text-[#cbc3d7] font-medium hover:text-[#4edea3] transition-colors duration-300" href="#">Provably Fair</a>
+<a class="text-[#cbc3d7] font-medium hover:text-[#4edea3] transition-colors duration-300" href="#">Support</a>
+</nav>
+<div class="flex gap-4 items-center">
+<button class="material-symbols-outlined text-[#cbc3d7] hover:text-[#4edea3] active:scale-95 transition-all">account_balance_wallet</button>
+<button class="material-symbols-outlined text-[#cbc3d7] hover:text-[#4edea3] active:scale-95 transition-all">notifications</button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-[#d0bcff]/30">
+<img alt="User" data-alt="close-up portrait of a futuristic gamer with neon reflective glasses and athletic gear" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCnxlBXCzhXKq4SVZV1sMRJWW4QcVfCy3u6CAMR5RKD1L33jfHPnbgT30AjiDB8Fc7mEYpYcFmp3DiKtCmd78J5NaehMR3jAZzSF_kv6qHv8Sov6k0LP1YAXSiY3KuTcvNACdkwraUMpSGmQyC3mJcrZ7MqGwvLWoAKHPEmbItUw9e9QXB08aqyUMEtSZU-OqTy06Hkad9XsR4L5IT_P61LspzXMohOXbe4l7xWEQ_-zC4Neq4RxuWgdKzqs5hvIcZiJ9s6sV158gFO"/>
+</div>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="relative min-h-screen md:ml-80 flex flex-col items-center justify-center overflow-hidden">
+<!-- Background Content (Desaturated) -->
+<div class="absolute inset-0 z-0 desaturated-bg">
+<div class="absolute inset-0 bg-surface"></div>
+<img class="w-full h-full object-cover opacity-30" data-alt="wide shot of a futuristic cricket stadium at night with massive holographic displays and dark dramatic sky" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBxOj1YFCNHy9lBRIWvL-JePY3LxHbDFleR_0RzhAGOXjdiVQgTbOQ6sWn0VubPMvaN4NqOxeQ8h6Mj3bg6gL4L-mdRGITT6UoiDPAtcICMmTdsDPB9LNbL03DNInwFW_QGgPOOyeVoMvP-JE9ORyIjhFSiZO2TlcFSX6lbAMRE0Lyz1F_NUjXYPy_SH7C2D3vuf-FMMdj-n53U2rGV262J5o2X_OnLvNjtXHQMRF22yn2RGcMvbTarnEB5ee-UdRmcioD-SDgmTTe-"/>
+</div>
+<!-- CRT & Intensity Overlays -->
+<div class="absolute inset-0 z-10 crt-overlay opacity-40"></div>
+<div class="absolute inset-0 z-10 intensity-gradient"></div>
+<!-- Terminated Message Container -->
+<div class="relative z-20 flex flex-col items-center text-center px-4">
+<div class="mb-2 tracking-[0.4em] text-[#f43f5e] font-label font-bold text-sm uppercase opacity-80">
+        SYSTEM OVERRIDE // SIGNAL LOST
+      </div>
+<h1 class="font-headline font-black text-6xl md:text-8xl text-white ruby-glow uppercase tracking-tighter mb-4 leading-none">
+        MATCH TERMINATED
+      </h1>
+<div class="flex items-center gap-6 mb-12">
+<div class="h-[2px] w-12 bg-gradient-to-r from-transparent to-[#f43f5e]"></div>
+<span class="text-4xl md:text-6xl font-headline font-black italic text-[#f43f5e] ruby-glow tracking-widest">
+          WICKET!
+        </span>
+<div class="h-[2px] w-12 bg-gradient-to-l from-transparent to-[#f43f5e]"></div>
+</div>
+<!-- Glassmorphism Stats Panel -->
+<div class="w-full max-w-xl bg-surface-variant/40 backdrop-blur-2xl p-1 rounded-2xl border border-white/5 shadow-[0_20px_50px_rgba(0,0,0,0.6)]">
+<div class="bg-surface-container-lowest/60 rounded-xl p-8 flex flex-col md:flex-row justify-between items-center gap-8">
+<div class="flex flex-col items-center md:items-start">
+<span class="font-label text-on-surface-variant text-[10px] uppercase tracking-[0.2em] mb-1">Final Multiplier</span>
+<div class="text-5xl font-headline font-black text-[#f43f5e] ruby-glow">
+              18.42<span class="text-2xl">x</span>
+</div>
+</div>
+<div class="h-12 w-[1px] bg-outline-variant/20 hidden md:block"></div>
+<div class="flex flex-col items-center">
+<span class="font-label text-on-surface-variant text-[10px] uppercase tracking-[0.2em] mb-1">Player Status</span>
+<div class="px-6 py-2 bg-[#f43f5e] text-white font-headline font-black text-2xl rounded-lg shadow-[0_0_20px_rgba(244,63,94,0.4)]">
+              OUT!
+            </div>
+</div>
+<div class="h-12 w-[1px] bg-outline-variant/20 hidden md:block"></div>
+<div class="flex flex-col items-center md:items-end">
+<span class="font-label text-on-surface-variant text-[10px] uppercase tracking-[0.2em] mb-1">Loss Amount</span>
+<div class="text-3xl font-headline font-bold text-on-surface">
+              $450.00
+            </div>
+</div>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="mt-12 flex flex-wrap justify-center gap-4">
+<button class="px-10 py-4 bg-[#f43f5e] text-white font-headline font-black rounded-xl hover:scale-105 active:scale-95 transition-all shadow-[0_10px_30px_rgba(244,63,94,0.3)]">
+          RETURN TO LOBBY
+        </button>
+<button class="px-10 py-4 bg-surface-container-highest text-primary font-headline font-black rounded-xl border border-outline-variant/20 hover:bg-surface-bright active:scale-95 transition-all">
+          VIEW FULL STATS
+        </button>
+</div>
+</div>
+<!-- HUD Elements / Decorative -->
+<div class="absolute bottom-10 left-10 z-20 hidden lg:block opacity-40">
+<div class="font-label text-[10px] text-[#f43f5e] mb-2 uppercase">Ball Velocity Log</div>
+<div class="flex flex-col gap-1">
+<div class="w-32 h-1 bg-[#f43f5e]/30 rounded-full overflow-hidden">
+<div class="w-2/3 h-full bg-[#f43f5e]"></div>
+</div>
+<div class="w-24 h-1 bg-[#f43f5e]/30 rounded-full overflow-hidden">
+<div class="w-1/2 h-full bg-[#f43f5e]"></div>
+</div>
+<div class="w-40 h-1 bg-[#f43f5e]/30 rounded-full overflow-hidden">
+<div class="w-4/5 h-full bg-[#f43f5e]"></div>
+</div>
+</div>
+</div>
+<div class="absolute top-32 right-10 z-20 hidden lg:block text-right opacity-40">
+<div class="font-label text-[10px] text-on-surface-variant uppercase">Session ID</div>
+<div class="text-xs text-on-surface">CR-992-001X-TERM</div>
+<div class="font-label text-[10px] text-on-surface-variant uppercase mt-4">Timestamp</div>
+<div class="text-xs text-on-surface">23:59:01:422</div>
+</div>
+</main>
+<!-- Mobile Navigation Shell -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-3 bg-[#0b1326]/80 backdrop-blur-2xl shadow-[0_-10px_40px_rgba(0,0,0,0.6)] rounded-t-3xl border-t border-[#494454]/20">
+<div class="flex flex-col items-center justify-center text-[#cbc3d7]/50 active:scale-90 transition-transform duration-150">
+<span class="material-symbols-outlined">sports_cricket</span>
+<span class="font-['Inter'] font-bold text-[10px] tracking-widest uppercase">Home</span>
+</div>
+<div class="flex flex-col items-center justify-center text-[#cbc3d7]/50 active:scale-90 transition-transform duration-150">
+<span class="material-symbols-outlined">payments</span>
+<span class="font-['Inter'] font-bold text-[10px] tracking-widest uppercase">Bets</span>
+</div>
+<div class="flex flex-col items-center justify-center text-[#cbc3d7]/50 active:scale-90 transition-transform duration-150">
+<span class="material-symbols-outlined">forum</span>
+<span class="font-['Inter'] font-bold text-[10px] tracking-widest uppercase">Chat</span>
+</div>
+<div class="flex flex-col items-center justify-center bg-[#4edea3]/10 text-[#4edea3] rounded-2xl px-6 py-2 shadow-[0_0_15px_rgba(78,222,163,0.2)] active:scale-90 transition-transform duration-150">
+<span class="material-symbols-outlined">leaderboard</span>
+<span class="font-['Inter'] font-bold text-[10px] tracking-widest uppercase">Rank</span>
+</div>
+</nav>
+</body></html>

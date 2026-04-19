@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>CRICKET CRASH - Betting &amp; Live Stats</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&amp;family=Space+Grotesk:wght@300..700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-fixed": "#ffdf9f",
+                        "on-secondary-container": "#00311f",
+                        "inverse-on-surface": "#283044",
+                        "surface-container-highest": "#2d3449",
+                        "secondary-fixed-dim": "#4edea3",
+                        "outline": "#958ea0",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-low": "#131b2e",
+                        "on-secondary-fixed": "#002113",
+                        "surface-tint": "#d0bcff",
+                        "surface-variant": "#2d3449",
+                        "surface": "#0b1326",
+                        "on-primary-fixed-variant": "#5516be",
+                        "on-background": "#dae2fd",
+                        "on-secondary-fixed-variant": "#005236",
+                        "secondary-fixed": "#6ffbbe",
+                        "surface-container-high": "#222a3d",
+                        "tertiary": "#f9bd22",
+                        "primary": "#d0bcff",
+                        "outline-variant": "#494454",
+                        "error-container": "#93000a",
+                        "tertiary-container": "#b88900",
+                        "surface-bright": "#31394d",
+                        "secondary-container": "#00a572",
+                        "on-secondary": "#003824",
+                        "on-tertiary-fixed-variant": "#5c4300",
+                        "on-primary": "#3c0091",
+                        "surface-dim": "#0b1326",
+                        "error": "#ffb4ab",
+                        "on-tertiary-container": "#372700",
+                        "primary-fixed-dim": "#d0bcff",
+                        "inverse-primary": "#6d3bd7",
+                        "surface-container-lowest": "#060e20",
+                        "on-surface": "#dae2fd",
+                        "on-error": "#690005",
+                        "primary-container": "#a078ff",
+                        "secondary": "#4edea3",
+                        "tertiary-fixed-dim": "#f9bd22",
+                        "on-surface-variant": "#cbc3d7",
+                        "background": "#0b1326",
+                        "surface-container": "#171f33",
+                        "inverse-surface": "#dae2fd",
+                        "primary-fixed": "#e9ddff",
+                        "on-primary-fixed": "#23005c",
+                        "on-primary-container": "#340080",
+                        "on-tertiary-fixed": "#261a00",
+                        "on-tertiary": "#402d00"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Space Grotesk"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(45, 52, 73, 0.6);
+            backdrop-filter: blur(12px) saturate(180%);
+            -webkit-backdrop-filter: blur(12px) saturate(180%);
+        }
+        .intensity-glow {
+            text-shadow: 0 0 20px rgba(208, 188, 255, 0.6);
+        }
+        .emerald-glow {
+            box-shadow: 0 0 15px rgba(78, 222, 163, 0.3);
+        }
+        body {
+            background-color: #0b1326;
+            color: #dae2fd;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #494454;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="font-body selection:bg-primary selection:text-on-primary">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-6 py-4 sticky top-0 z-50 bg-[#0b1326]/60 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
+<div class="text-2xl font-black text-[#d0bcff] drop-shadow-[0_0_15px_rgba(208,188,255,0.8)] font-['Inter'] uppercase tracking-tighter">
+            CRICKET CRASH
+        </div>
+<nav class="hidden md:flex items-center space-x-8">
+<a class="text-[#d0bcff] border-b-2 border-[#d0bcff] pb-1 font-['Inter'] font-black uppercase tracking-tighter transition-transform active:scale-95" href="#">Lobby</a>
+<a class="text-[#cbc3d7] font-medium hover:text-[#4edea3] transition-colors duration-300 font-['Inter'] uppercase tracking-tighter active:scale-95" href="#">Live Stats</a>
+<a class="text-[#cbc3d7] font-medium hover:text-[#4edea3] transition-colors duration-300 font-['Inter'] uppercase tracking-tighter active:scale-95" href="#">Provably Fair</a>
+<a class="text-[#cbc3d7] font-medium hover:text-[#4edea3] transition-colors duration-300 font-['Inter'] uppercase tracking-tighter active:scale-95" href="#">Support</a>
+</nav>
+<div class="flex items-center space-x-4">
+<button class="flex items-center bg-surface-container-highest px-4 py-2 rounded-full border border-outline-variant/20 active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-secondary mr-2" data-icon="account_balance_wallet">account_balance_wallet</span>
+<span class="font-label font-bold text-sm">$12,450.80</span>
+</button>
+<div class="flex space-x-2">
+<button class="p-2 text-[#cbc3d7] hover:text-[#4edea3] transition-colors active:scale-95"><span class="material-symbols-outlined" data-icon="notifications">notifications</span></button>
+<button class="p-2 text-[#cbc3d7] hover:text-[#4edea3] transition-colors active:scale-95"><span class="material-symbols-outlined" data-icon="person">person</span></button>
+</div>
+</div>
+<div class="bg-gradient-to-r from-transparent via-[#494454]/20 to-transparent h-[1px] w-full absolute bottom-0"></div>
+</header>
+<div class="flex min-h-screen">
+<!-- SideNavBar -->
+<aside class="hidden lg:flex flex-col h-screen w-80 fixed left-0 top-0 bg-[#2d3449]/60 backdrop-blur-xl saturate-[180%] z-40 shadow-[20px_0_40px_rgba(0,0,0,0.4)] pt-20">
+<div class="px-6 mb-8">
+<h3 class="font-label font-bold text-xs uppercase tracking-widest text-secondary">STADIUM FEED</h3>
+<p class="text-[10px] text-on-surface-variant/60 font-medium">1,248 Players Online</p>
+</div>
+<nav class="flex-1 space-y-1">
+<div class="flex items-center px-6 py-4 bg-gradient-to-r from-[#4edea3]/20 to-transparent text-[#4edea3] border-l-4 border-[#4edea3] cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined mr-4" data-icon="analytics">analytics</span>
+<span class="font-label font-bold text-xs uppercase">Live Bets</span>
+</div>
+<div class="flex items-center px-6 py-4 text-[#cbc3d7]/70 hover:text-[#cbc3d7] hover:bg-white/5 cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined mr-4" data-icon="history">history</span>
+<span class="font-label font-bold text-xs uppercase">My Bets</span>
+</div>
+<div class="flex items-center px-6 py-4 text-[#cbc3d7]/70 hover:text-[#cbc3d7] hover:bg-white/5 cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined mr-4" data-icon="workspace_premium">workspace_premium</span>
+<span class="font-label font-bold text-xs uppercase">High Rollers</span>
+</div>
+<div class="flex items-center px-6 py-4 text-[#cbc3d7]/70 hover:text-[#cbc3d7] hover:bg-white/5 cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined mr-4" data-icon="military_tech">military_tech</span>
+<span class="font-label font-bold text-xs uppercase">Daily Race</span>
+</div>
+<div class="flex items-center px-6 py-4 text-[#cbc3d7]/70 hover:text-[#cbc3d7] hover:bg-white/5 cursor-pointer transition-all duration-200">
+<span class="material-symbols-outlined mr-4" data-icon="update">update</span>
+<span class="font-label font-bold text-xs uppercase">History</span>
+</div>
+</nav>
+<div class="mt-auto p-6 space-y-4">
+<div class="bg-surface-container-low rounded-xl p-4 border border-outline-variant/10">
+<div class="flex justify-between items-center mb-2">
+<span class="text-[10px] font-label font-bold text-on-surface-variant">NEXT MATCH</span>
+<span class="text-[10px] font-label font-bold text-tertiary">00:45</span>
+</div>
+<div class="h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="h-full bg-tertiary w-3/4"></div>
+</div>
+</div>
+</div>
+<div class="bg-gradient-to-b from-[#494454]/20 via-transparent to-[#494454]/20 w-[1px] h-full absolute right-0"></div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="flex-1 lg:ml-80 pb-24 md:pb-0">
+<div class="p-4 md:p-8 grid grid-cols-12 gap-6">
+<!-- Game Canvas Section -->
+<section class="col-span-12 xl:col-span-8 space-y-6">
+<!-- The Multiplier Display (Intensity Meter) -->
+<div class="relative aspect-video rounded-3xl overflow-hidden bg-surface-container-lowest border border-outline-variant/10 shadow-2xl flex flex-col items-center justify-center group">
+<img alt="Cricket stadium interior at night" class="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-luminosity grayscale" data-alt="dramatic wide angle shot of a futuristic cricket stadium at night with neon lights and digital holographic overlays" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCt3Ca8SaJ4g51TQB1MoSc_xvrFl02F7iEEvlb4seTQhexKS1jaZ_QkvIumi73NeybAL3mWfmznKsNLcr7JZQ_Iy9FY6SBj0aLz4ilDCvxfKToB9NjT4babP-0L3oF_lv5f8yrrZb9M2w_yYtOfK8O3BalShuFJgAitD0CxjNblTqTMp3TJHJELnHwTBjC8_I_fNJ_OcTyjPBmC9mEnyWU0E1fjYVYKlLy7P4Wd0zCkDJ9Wyxca078iRDAjVUeyWY-0V_8EdJ-BQmYe"/>
+<div class="absolute inset-0 bg-gradient-to-t from-surface via-transparent to-transparent"></div>
+<!-- Kinetic HUD Elements -->
+<div class="absolute top-8 left-8 flex space-x-2">
+<div class="px-3 py-1 glass-panel rounded-full border border-primary/20 text-[10px] font-label font-black text-primary tracking-widest uppercase">Live Session: #8294</div>
+</div>
+<!-- Main Multiplier -->
+<div class="relative z-10 text-center">
+<h1 class="text-8xl md:text-9xl font-black text-primary-fixed intensity-glow tracking-tighter font-headline">
+                                4.82<span class="text-4xl md:text-6xl">x</span>
+</h1>
+<p class="font-label font-bold text-secondary uppercase tracking-[0.5em] mt-4">Current Multiplier</p>
+</div>
+<!-- Progress Line (Abstract Kinetic AR) -->
+<div class="absolute bottom-0 left-0 w-full h-1.5 bg-surface-container-highest">
+<div class="h-full bg-gradient-to-r from-primary via-secondary to-tertiary w-2/3 shadow-[0_0_15px_rgba(78,222,163,0.5)]"></div>
+</div>
+</div>
+<!-- Crash History Chips -->
+<div class="flex items-center gap-3 overflow-x-auto pb-2 no-scrollbar">
+<span class="text-[10px] font-label font-bold text-on-surface-variant uppercase mr-2 shrink-0">Recent:</span>
+<div class="px-4 py-2 glass-panel rounded-lg border border-outline-variant/10 text-xs font-black text-error">1.12x</div>
+<div class="px-4 py-2 glass-panel rounded-lg border border-outline-variant/10 text-xs font-black text-secondary">3.45x</div>
+<div class="px-4 py-2 glass-panel rounded-lg border border-outline-variant/10 text-xs font-black text-tertiary intensity-glow">12.04x</div>
+<div class="px-4 py-2 glass-panel rounded-lg border border-outline-variant/10 text-xs font-black text-secondary">2.88x</div>
+<div class="px-4 py-2 glass-panel rounded-lg border border-outline-variant/10 text-xs font-black text-error">1.02x</div>
+<div class="px-4 py-2 glass-panel rounded-lg border border-outline-variant/10 text-xs font-black text-secondary">5.20x</div>
+<div class="px-4 py-2 glass-panel rounded-lg border border-outline-variant/10 text-xs font-black text-secondary">4.11x</div>
+</div>
+<!-- Betting Panel (Premium AR Overlay) -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Bet 1 -->
+<div class="glass-panel rounded-3xl p-6 border border-primary/10 relative overflow-hidden">
+<div class="flex justify-between items-center mb-6">
+<label class="font-label font-bold text-xs text-on-surface-variant uppercase tracking-widest">Stake Amount</label>
+<div class="flex gap-2">
+<button class="text-[10px] font-bold bg-surface-container-highest px-2 py-1 rounded-md text-primary border border-outline-variant/20">MIN</button>
+<button class="text-[10px] font-bold bg-surface-container-highest px-2 py-1 rounded-md text-primary border border-outline-variant/20">MAX</button>
+</div>
+</div>
+<div class="relative mb-6">
+<input class="w-full bg-surface-container-lowest border-0 rounded-2xl p-4 text-2xl font-black text-on-surface focus:ring-1 focus:ring-secondary transition-all outline-none font-headline" type="text" value="100.00"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 font-label font-bold text-on-surface-variant/40">USD</span>
+</div>
+<button class="w-full bg-secondary text-on-secondary-container py-5 rounded-2xl font-headline font-black text-xl uppercase tracking-tighter emerald-glow active:scale-[0.98] transition-all hover:bg-secondary-fixed-dim">
+                                PLACE BET
+                            </button>
+<div class="mt-4 flex justify-between items-center">
+<span class="text-[10px] font-label font-bold text-on-surface-variant/60 uppercase">Auto Cashout</span>
+<span class="text-sm font-black text-primary">2.00x</span>
+</div>
+</div>
+<!-- Bet 2 (Active/Success State) -->
+<div class="glass-panel rounded-3xl p-6 border border-secondary/30 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-3">
+<span class="flex h-2 w-2 rounded-full bg-secondary"></span>
+</div>
+<div class="flex justify-between items-center mb-6">
+<label class="font-label font-bold text-xs text-secondary uppercase tracking-widest">Active Bet</label>
+<span class="text-[10px] font-bold text-on-surface-variant">#B-9021</span>
+</div>
+<div class="relative mb-6">
+<div class="w-full bg-surface-container-lowest/50 rounded-2xl p-4 flex flex-col">
+<span class="text-[10px] font-label text-on-surface-variant mb-1">STAKED</span>
+<span class="text-2xl font-black text-on-surface font-headline">$500.00</span>
+</div>
+</div>
+<button class="w-full bg-error-container text-on-error-container py-5 rounded-2xl font-headline font-black text-xl uppercase tracking-tighter active:scale-[0.98] transition-all hover:opacity-90">
+                                CASHOUT <span class="ml-2 text-white">$2,410.00</span>
+</button>
+<div class="mt-4 flex justify-between items-center">
+<span class="text-[10px] font-label font-bold text-on-surface-variant/60 uppercase">Expected Profit</span>
+<span class="text-sm font-black text-secondary">+$1,910.00</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Activity/Stats Side Panel -->
+<aside class="col-span-12 xl:col-span-4 space-y-6">
+<div class="glass-panel rounded-3xl h-[600px] flex flex-col border border-outline-variant/10 overflow-hidden">
+<div class="p-6 border-b border-outline-variant/10 flex justify-between items-center">
+<h2 class="font-label font-black text-sm uppercase tracking-widest text-on-surface">Live Bets</h2>
+<div class="flex items-center space-x-2">
+<span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+<span class="text-[10px] font-label font-bold text-on-surface-variant uppercase">82 Active</span>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto p-2 space-y-1">
+<!-- Table Headers -->
+<div class="grid grid-cols-3 px-4 py-2 text-[10px] font-label font-bold text-on-surface-variant/50 uppercase tracking-widest">
+<span>Player</span>
+<span class="text-center">Bet</span>
+<span class="text-right">Multiplier</span>
+</div>
+<!-- Activity Rows -->
+<div class="grid grid-cols-3 items-center px-4 py-3 bg-surface-container-low rounded-xl border border-outline-variant/5">
+<div class="flex items-center space-x-2">
+<div class="w-6 h-6 rounded-full bg-gradient-to-br from-primary to-secondary p-[1px]">
+<div class="w-full h-full bg-surface-container-highest rounded-full flex items-center justify-center text-[8px] font-black">JS</div>
+</div>
+<span class="text-xs font-bold text-on-surface truncate">j.stokes_88</span>
+</div>
+<span class="text-xs font-black text-on-surface text-center">$120.00</span>
+<div class="text-right">
+<span class="px-2 py-0.5 bg-secondary/10 text-secondary text-[10px] font-black rounded-full border border-secondary/20">2.14x</span>
+</div>
+</div>
+<div class="grid grid-cols-3 items-center px-4 py-3 hover:bg-white/5 transition-all rounded-xl">
+<div class="flex items-center space-x-2">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center text-[8px] font-black">KC</div>
+<span class="text-xs font-bold text-on-surface-variant truncate">king_cricket</span>
+</div>
+<span class="text-xs font-black text-on-surface text-center">$2,500.00</span>
+<div class="text-right">
+<span class="text-[10px] font-black text-on-surface-variant/40">—</span>
+</div>
+</div>
+<div class="grid grid-cols-3 items-center px-4 py-3 bg-tertiary/10 rounded-xl border border-tertiary/20">
+<div class="flex items-center space-x-2">
+<div class="w-6 h-6 rounded-full bg-tertiary flex items-center justify-center text-[8px] font-black text-on-tertiary">HR</div>
+<span class="text-xs font-bold text-tertiary truncate">high_roller_v</span>
+</div>
+<span class="text-xs font-black text-tertiary text-center">$15,000.00</span>
+<div class="text-right">
+<span class="px-2 py-0.5 bg-tertiary/20 text-tertiary text-[10px] font-black rounded-full border border-tertiary/20">8.42x</span>
+</div>
+</div>
+<div class="grid grid-cols-3 items-center px-4 py-3 hover:bg-white/5 transition-all rounded-xl">
+<div class="flex items-center space-x-2">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center text-[8px] font-black">MA</div>
+<span class="text-xs font-bold text-on-surface-variant truncate">mo_ali_2</span>
+</div>
+<span class="text-xs font-black text-on-surface text-center">$50.00</span>
+<div class="text-right">
+<span class="px-2 py-0.5 bg-error/10 text-error text-[10px] font-black rounded-full border border-error/20">1.02x</span>
+</div>
+</div>
+<!-- Repeat standard rows for density -->
+<div class="grid grid-cols-3 items-center px-4 py-3 hover:bg-white/5 transition-all rounded-xl">
+<div class="flex items-center space-x-2">
+<div class="w-6 h-6 rounded-full bg-surface-container-highest flex items-center justify-center text-[8px] font-black">SD</div>
+<span class="text-xs font-bold text-on-surface-variant truncate">sam_d007</span>
+</div>
+<span class="text-xs font-black text-on-surface text-center">$300.00</span>
+<div class="text-right">
+<span class="text-[10px] font-black text-on-surface-variant/40">—</span>
+</div>
+</div>
+</div>
+<!-- Chat Quick-Input HUD (Asymmetric Floating) -->
+<div class="p-4 bg-surface-container-lowest/80 border-t border-outline-variant/10">
+<div class="relative flex items-center">
+<input class="w-full bg-surface-container-low border border-outline-variant/10 rounded-full px-4 py-2 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary/40" placeholder="Send message..." type="text"/>
+<button class="absolute right-2 text-primary p-1"><span class="material-symbols-outlined text-sm" data-icon="forum">forum</span></button>
+</div>
+</div>
+</div>
+</aside>
+</div>
+</main>
+</div>
+<!-- BottomNavBar (Mobile Only) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-3 md:hidden bg-[#0b1326]/80 backdrop-blur-2xl rounded-t-3xl border-t border-[#494454]/20 shadow-[0_-10px_40px_rgba(0,0,0,0.6)]">
+<a class="flex flex-col items-center justify-center text-[#cbc3d7]/50 active:scale-90 transition-transform duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="sports_cricket">sports_cricket</span>
+<span class="font-['Inter'] font-bold text-[10px] tracking-widest mt-1">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-[#4edea3]/10 text-[#4edea3] rounded-2xl px-6 py-2 shadow-[0_0_15px_rgba(78,222,163,0.2)] active:scale-90 transition-transform duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="payments" style="font-variation-settings: 'FILL' 1;">payments</span>
+<span class="font-['Inter'] font-bold text-[10px] tracking-widest mt-1">Bets</span>
+</a>
+<a class="flex flex-col items-center justify-center text-[#cbc3d7]/50 active:scale-90 transition-transform duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="forum">forum</span>
+<span class="font-['Inter'] font-bold text-[10px] tracking-widest mt-1">Chat</span>
+</a>
+<a class="flex flex-col items-center justify-center text-[#cbc3d7]/50 active:scale-90 transition-transform duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="leaderboard">leaderboard</span>
+<span class="font-['Inter'] font-bold text-[10px] tracking-widest mt-1">Stats</span>
+</a>
+</nav>
+</body></html>

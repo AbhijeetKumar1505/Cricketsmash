@@ -1,0 +1,20 @@
+{
+  "name": "cricket-crash",
+  "private": true,
+  "packageManager": "pnpm@10.5.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5"
+  },
+  "scripts": {
+    "bootstrap": "npx --yes pnpm@10.5.0 install && npm run build:packages",
+    "build:packages": "npx --yes pnpm@10.5.0 -r --filter \"./packages/*\" run build",
+    "build": "npx --yes pnpm@10.5.0 -r run build",
+    "dev": "npm run build:packages && npx --yes pnpm@10.5.0 --filter @cricket-crash/frontend run dev",
+    "dev:frontend": "npm run build:packages && npx --yes pnpm@10.5.0 --filter @cricket-crash/frontend dev",
+    "typecheck": "npx --yes pnpm@10.5.0 -r run typecheck",
+    "build:frontend": "npm run build:packages && npx --yes pnpm@10.5.0 --filter @cricket-crash/frontend run build"
+  }
+}
