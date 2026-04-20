@@ -16,6 +16,7 @@
     perspective = 'broadcast' as CameraPerspective,
     phaseProgress = 0,
     shotType = 'defend' as ShotType,
+    shotLabel = '',
   } = $props<{
     phase?: SimPhase;
     multiplier?: number;
@@ -26,6 +27,7 @@
     perspective?: CameraPerspective;
     phaseProgress?: number;
     shotType?: ShotType;
+    shotLabel?: string;
   }>();
 
   let host: HTMLDivElement;
@@ -43,6 +45,7 @@
       perspective,
       phaseProgress,
       shotType,
+      shotLabel,
     };
   }
 

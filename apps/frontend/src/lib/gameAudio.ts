@@ -337,3 +337,86 @@ export function playCashoutWin(): void {
   sweep.connect(sweepG); sweepG.connect(master);
   sweep.start(); sweep.stop(c.currentTime + 0.38);
 }
+
+// ─── Crowd Sound Design (Synthesized) ────────────────────────────────────────
+
+let crowdMurmur: { src: AudioBufferSourceNode; gain: GainNode; lp: BiquadFilterNode } | null = null;
+
+/** Start a continuous background crowd murmur (pink-ish noise) */
+export function startCrowdMurmur(): void {
+  const c = resume();
+  if (!c || crowdMurmur) return;
+
+  const bufSize = c.sampleRate * 2;
+  const buf = c.createBuffer(1, bufSize, c.sampleRate);
+  const d = buf.getChannelData(0);
+  // Simple noise with brown-ish tilt
+  let lastOut = 0;
+  for (let i = 0; i < bufSize; i++) {
+    const white = Math.random() * 2 - 1;
+    const brown = (lastOut + (0.02 * white)) / 1.02;
+    lastOut = brown;
+    d[i] = brown * 3.5;
+  }
+
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 800; // Base muffled crowd
+  lp.Q.value = 1.0;
+
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0, c.currentTime);
+  gain.gain.linearRampToValueAtTime(0.04, c.currentTime + 2.0);
+
+  src.connect(lp);
+  lp.connect(gain);
+  gain.connect(c.destination);
+
+  src.start();
+  crowdMurmur = { src, gain, lp };
+}
+
+/** Update crowd roar intensity and brightness (0-1) */
+export function updateCrowdHype(level: number): void {
+  if (!crowdMurmur) return;
+  const c = getCtx();
+  if (!c) return;
+
+  const targetFreq = 800 + level * 2200;
+  const targetGain = 0.04 + level * 0.08;
+
+  crowdMurmur.lp.frequency.setTargetAtTime(targetFreq, c.currentTime, 0.4);
+  crowdMurmur.gain.gain.setTargetAtTime(targetGain, c.currentTime, 0.4);
+}
+
+/** One-off reaction shout burst */
+export function playCrowdShout(intensity: number): void {
+  const c = resume();
+  if (!c) return;
+
+  const dur = 0.8 + intensity * 1.5;
+  const buf = c.createBuffer(1, c.sampleRate * dur, c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+
+  const src = c.createBufferSource();
+  src.buffer = buf;
+
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1200 + intensity * 800;
+  bp.Q.value = 0.8;
+
+  const gain = c.createGain();
+  gain.gain.setValueAtTime(0, c.currentTime);
+  gain.gain.linearRampToValueAtTime(0.12 * intensity, c.currentTime + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
+
+  src.connect(bp); bp.connect(gain); gain.connect(c.destination);
+  src.start(); src.stop(c.currentTime + dur);
+}
+

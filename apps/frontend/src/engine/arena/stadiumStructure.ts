@@ -45,35 +45,60 @@ function makeAdBoardTexture(idx: number): THREE.CanvasTexture {
   c.width = W; c.height = H;
   const ctx = c.getContext('2d')!;
 
-  type BoardDef = { bg: string; fg: string; text: string };
+  // Parody brand boundary boards — double exposure with LED ribbon sponsors
+  type BoardDef = { bg: string; fg: string; accent: string; text: string; tagline: string };
   const boards: BoardDef[] = [
-    { bg: '#00a651', fg: '#ffffff', text: '◆ CRICKET CRASH ◆' },
-    { bg: '#c8102e', fg: '#ffffff', text: '★  BET LIVE  ★' },
-    { bg: '#f7941d', fg: '#1a1a1a', text: '⚡ POWERPLAY ⚡' },
-    { bg: '#1a1a2e', fg: '#e94560', text: '▶ SMASH ZONE ◀' },
-    { bg: '#0d2137', fg: '#00d4ff', text: '◉ LIVE BETTING ◉' },
-    { bg: '#2d1a3a', fg: '#c084fc', text: '✦ ULTRA MULTI ✦' },
+    { bg: '#8b0000', fg: '#ffffff', accent: '#ff3333', text: 'BOKA COLA',       tagline: 'Taste the Crash' },
+    { bg: '#00308f', fg: '#ffffff', accent: '#3399ff', text: 'BURPSI',          tagline: 'The Next Gulp' },
+    { bg: '#1a1a3e', fg: '#ffd700', accent: '#4444ff', text: 'DEAD BULL',       tagline: 'Gives You Wings...' },
+    { bg: '#b8860b', fg: '#ffffff', accent: '#ffcc00', text: "LAZY'S",          tagline: "Can't Hit Just One" },
+    { bg: '#cc3300', fg: '#ffffff', accent: '#ff6622', text: "DORIDON'TS",      tagline: 'Bold & Broke' },
+    { bg: '#1a1a1a', fg: '#ffffff', accent: '#ff6600', text: 'NIKO',            tagline: "Don't Do It" },
+    { bg: '#111111', fg: '#ffffff', accent: '#aaaaaa', text: 'BADIDAS',         tagline: 'Impossible is Guaranteed' },
+    { bg: '#1a1a1a', fg: '#d4af37', accent: '#ffd700', text: 'LOOMA',           tagline: 'Forever Slower' },
+    { bg: '#c0392b', fg: '#ffffff', accent: '#3498db', text: 'NO BALANCE',      tagline: 'Endorsed by Nobody' },
+    { bg: '#1a3c6e', fg: '#ff4444', accent: '#ff6666', text: 'WEAKBOK',         tagline: 'I Am Not Fit' },
+    { bg: '#cc0000', fg: '#ffd700', accent: '#ff4444', text: 'FAILRARI',        tagline: 'Stuck in Park' },
+    { bg: '#0a2a4a', fg: '#ffffff', accent: '#4488cc', text: 'BRW',             tagline: 'Barely Running Well' },
+    { bg: '#cc4400', fg: '#ffffff', accent: '#ff6622', text: 'BLASTERCARD',     tagline: 'Priceless & Empty' },
+    { bg: '#1a237e', fg: '#ffd700', accent: '#3355cc', text: 'VISA-LESS',       tagline: "Everywhere You Aren't" },
+    { bg: '#004d00', fg: '#ff3333', accent: '#00cc44', text: 'HEINECANT',       tagline: 'Probably the Worst' },
+    { bg: '#8b0000', fg: '#ffd700', accent: '#cc3333', text: 'BUDDWEAKER',      tagline: 'King of Broken Dreams' },
+    { bg: '#0a1a0a', fg: '#00ff44', accent: '#00cc33', text: 'MONSTER LAZY',    tagline: 'Unleash the Nap' },
+    { bg: '#0d47a1', fg: '#ffffff', accent: '#2196f3', text: 'SAMESUNG',        tagline: "Can't Afford It" },
   ];
   const b = boards[idx % boards.length]!;
 
+  // Dark gradient background
   const grad = ctx.createLinearGradient(0, 0, W, 0);
-  grad.addColorStop(0,   b.bg + 'bb');
+  grad.addColorStop(0,   b.bg + 'cc');
   grad.addColorStop(0.5, b.bg);
-  grad.addColorStop(1,   b.bg + 'bb');
+  grad.addColorStop(1,   b.bg + 'cc');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  ctx.strokeStyle = b.fg + '44';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(3, 3, W - 6, H - 6);
+  // Neon accent border
+  ctx.fillStyle = b.accent + '88';
+  ctx.fillRect(0, 0, W, 2);
+  ctx.fillRect(0, H - 2, W, 2);
 
-  ctx.shadowBlur = 14;
-  ctx.shadowColor = b.fg;
+  // Brand name (left-center)
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = b.accent;
   ctx.fillStyle = b.fg;
-  ctx.font = 'bold 22px monospace';
+  ctx.font = 'bold 24px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(b.text, W / 2, H / 2);
+  ctx.fillText(b.text, W * 0.38, H / 2);
+
+  // Tagline (right side, smaller)
+  ctx.shadowBlur = 6;
+  ctx.shadowColor = b.accent;
+  ctx.fillStyle = b.accent + 'cc';
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(b.tagline, W * 0.76, H / 2);
 
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -151,12 +176,12 @@ export function createStadiumStructure(): StadiumStructure {
 
     const bGeo = new THREE.PlaneGeometry(8.2, 2.2);
     toDispose.push(bGeo);
-    const bMat = new THREE.MeshBasicMaterial({ map: adTex, side: THREE.DoubleSide });
+    const bMat = new THREE.MeshBasicMaterial({ map: adTex, side: THREE.FrontSide });
     toDispose.push(bMat);
 
     const board = new THREE.Mesh(bGeo, bMat);
     board.position.set(Math.sin(angle) * r, 1.1, Math.cos(angle) * r);
-    board.rotation.y = angle;
+    board.rotation.y = angle + Math.PI; // Face inward toward pitch
     group.add(board);
   }
 

@@ -110,10 +110,8 @@ export function computeBallFrame(p: TrajectoryParams): BallFrame {
       glowStrength = 0.14;
     }
   } else if (ph === 'hit') {
-    // Continuous trajectory linked to multiplier rather than fixed 1.0s duration
-    // We use a base progress pp for sub-frame smoothing, but the multiplier is the scale
-    const distFactor = Math.log(mult) * 80;
-    
+    const distFactor = Math.log(Math.max(1.001, mult)) * 80;
+
     if (traj === 'six') {
       bx = SIM.BALL_AT_BAT_X + distFactor * 2.5;
       by = SIM.BALL_AT_BAT_Y - Math.sin(Math.min(pp, 1) * Math.PI) * 120 - distFactor * 0.5;
@@ -122,15 +120,21 @@ export function computeBallFrame(p: TrajectoryParams): BallFrame {
       glowStrength = 0.22 + mult * 0.05;
     } else if (traj === 'four') {
       bx = SIM.BALL_AT_BAT_X + distFactor * 3.2;
-      // Bounce frequency increases as it slows down? No, standard crash is simple.
-      const bounceU = (pp * 4) % 1.0; 
-      by = SIM.BALL_AT_BAT_Y - 4 * 16 * bounceU * (1 - bounceU);
+      // Drop from bat contact height to GROUND (SIM.GY) quickly, then bounce at ground level
+      const groundReach = easeOut(clamp(pp * 5, 0, 1));
+      const bounceU = (pp * 2.8) % 1.0;
+      const bounceAmp = 22 * Math.exp(-pp * 1.2); // decaying bounce height
+      by = lerp(SIM.BALL_AT_BAT_Y, SIM.GY, groundReach)
+         - 4 * bounceAmp * bounceU * (1 - bounceU) * groundReach;
       bScale = 1.05;
       glowRgb = [1, 0.52, 0.2];
       glowStrength = 0.18 + mult * 0.02;
     } else {
       bx = SIM.BALL_AT_BAT_X + distFactor * 1.8;
-      by = SIM.BALL_AT_BAT_Y - 4 * 12 * pp * (1 - pp);
+      // Ball drops to ground quickly then rolls with small decaying bounces
+      const groundReach = easeOut(clamp(pp * 4, 0, 1));
+      const softBounce = 8 * Math.exp(-pp * 3) * Math.max(0, Math.sin(pp * Math.PI * 2.5));
+      by = lerp(SIM.BALL_AT_BAT_Y, SIM.GY, groundReach) - softBounce * groundReach;
       glowRgb = [1, 0.4, 0.25];
       glowStrength = 0.15 + mult * 0.01;
     }

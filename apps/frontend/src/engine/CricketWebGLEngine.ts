@@ -41,18 +41,7 @@ function easeOut(t: number) {
   return 1 - (1 - t) * (1 - t);
 }
 
-const NAMES = {
-  six: ['MAXIMUM!', 'SIX! SIX! SIX!', 'OVER THE ROPE!', 'HUGE HIT!'],
-  four: ['FOUR!', 'BOUNDARY!', 'CRACKING DRIVE!', 'MAGNIFICENT!'],
-  runs: ['GOOD SHOT!', 'RUNNING HARD!', 'SHARP CRICKET!'],
-  dot: ['DEFENDED!', 'DOT BALL!', 'TIGHT LINE!'],
-  wicket: ['BOWLED!', 'TIMBER!', 'CLEAN BOWLED!', 'OUT!'],
-};
-
-function pickDeterministic(arr: string[], seed: number) {
-  const i = Math.abs(seed) % arr.length;
-  return arr[i]!;
-}
+// Removed legacy flavor NAMES to keep 3D/HUD in data-sync.
 
 export interface EngineCallbacks {
   onShotLabel?: (text: string, color: string, alpha: number) => void;
@@ -68,6 +57,7 @@ export interface EngineProps {
   perspective?: CameraPerspective;
   phaseProgress?: number;
   shotType?: ShotType;
+  shotLabel?: string;
 }
 
 export class CricketWebGLEngine {
@@ -264,16 +254,7 @@ export class CricketWebGLEngine {
         this.battingStumps.resetWicket();
       }
       if (ph === 'hit') {
-        const seed = dKey * 17 + 3;
-        const n =
-          traj === 'six'
-            ? pickDeterministic(NAMES.six, seed)
-            : traj === 'four'
-              ? pickDeterministic(NAMES.four, seed + 1)
-              : runs > 0
-                ? pickDeterministic(NAMES.runs, seed + 2)
-                : pickDeterministic(NAMES.dot, seed + 4);
-        this.shotText = n;
+        this.shotText = this.props.shotLabel || (runs > 0 ? `${runs} RUNS` : 'DOT BALL');
         this.shotColor =
           traj === 'six' ? '#facc15' : traj === 'four' ? '#fb923c' : runs > 0 ? '#86efac' : '#94a3b8';
         this.shotAlpha = 1.3;
@@ -287,7 +268,7 @@ export class CricketWebGLEngine {
       }
       if (ph === 'wicket') {
         this.stumpsFly = true;
-        this.shotText = pickDeterministic(NAMES.wicket, dKey * 19 + 7);
+        this.shotText = this.props.shotLabel || 'WICKET!';
         this.shotColor = '#ef4444';
         this.shotAlpha = 1.3;
 
@@ -321,16 +302,7 @@ export class CricketWebGLEngine {
       if (ph === 'hit') {
         this.phaseStartT = this.t;
         this.dustSpawnedBounce = false;
-        const seed = dKey * 17 + 3;
-        const n =
-          traj === 'six'
-            ? pickDeterministic(NAMES.six, seed)
-            : traj === 'four'
-              ? pickDeterministic(NAMES.four, seed + 1)
-              : runs > 0
-                ? pickDeterministic(NAMES.runs, seed + 2)
-                : pickDeterministic(NAMES.dot, seed + 4);
-        this.shotText = n;
+        this.shotText = this.props.shotLabel || (runs > 0 ? `${runs} RUNS` : 'DOT BALL');
         this.shotColor =
           traj === 'six' ? '#facc15' : traj === 'four' ? '#fb923c' : runs > 0 ? '#86efac' : '#94a3b8';
         this.shotAlpha = 1.3;

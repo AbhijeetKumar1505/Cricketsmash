@@ -58,8 +58,8 @@ export function createPlaybackEngine(): PlaybackEngine {
 
         const currentDelivery = activeDeliveries[currentBallIdx]!;
         const bowlDur = phaseLength('bowl', currentDelivery.bowlerType) * 1000;
-        const revealDur = 1500;
-        const celebrateDur = 2000;
+        const revealDur = 1800;
+        const celebrateDur = 2400;
         const wicketDur = 1800;
 
         const growth = currentDelivery.endMultiplier - currentDelivery.startMultiplier;

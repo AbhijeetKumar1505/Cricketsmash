@@ -7,7 +7,8 @@ import type { StakeGameClient, AuthResult, PlayResult, GameModeName } from './st
 import type { Balance, AuthenticateConfig, JurisdictionFlags, Round } from 'stake-engine';
 
 const MOCK_CURRENCY = 'USD' as const;
-const MOCK_BET_LEVELS = [100000, 200000, 500000, 1000000, 2000000, 5000000, 10000000];
+// Bet levels in micro-units (1_000_000 = $1.00)
+const MOCK_BET_LEVELS = [1_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000, 500_000_000];
 
 // Cricket crash payout distribution (weighted random)
 function randomPayoutMultiplier(): number {
@@ -29,8 +30,8 @@ export function createDevMockClient(): StakeGameClient {
   const config: AuthenticateConfig = {
     minBet: MOCK_BET_LEVELS[0],
     maxBet: MOCK_BET_LEVELS[MOCK_BET_LEVELS.length - 1],
-    stepBet: 100000,
-    defaultBetLevel: 1000000,
+    stepBet: 500_000,
+    defaultBetLevel: 10_000_000,
     betLevels: MOCK_BET_LEVELS,
   };
 

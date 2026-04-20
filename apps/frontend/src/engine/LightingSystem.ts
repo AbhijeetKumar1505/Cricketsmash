@@ -9,6 +9,7 @@ export class LightingSystem {
   private environment: ArenaEnvironment;
   private prevRisk: string = 'idle';
   private strobeLight: THREE.PointLight;
+  private flickerTimer = 0;
 
   constructor(scene: THREE.Scene) {
     this.environment = createEnvironment();
@@ -26,7 +27,11 @@ export class LightingSystem {
     scene.add(this.strobeLight);
   }
 
-  update(_dt: number, time: number, props: EngineProps) {
+  triggerFlicker() {
+    this.flickerTimer = 0.8; // 0.8s of flickering
+  }
+
+  update(dt: number, time: number, props: EngineProps) {
     this.environment.update(time);
     const ph = props.phase;
     const mult = props.multiplier;
@@ -42,6 +47,15 @@ export class LightingSystem {
     if (risk !== this.prevRisk) {
       updateLightingRiskEvent(this.stadiumLights, risk);
       this.prevRisk = risk;
+    }
+
+    // Flicker Logic (Brownout/Strobe)
+    if (this.flickerTimer > 0) {
+      this.flickerTimer -= dt;
+      const flicker = Math.random() > 0.5 ? 0.3 : 1.0;
+      this.stadiumLights.ambient.intensity *= flicker;
+      this.stadiumLights.key.intensity *= flicker;
+      this.stadiumLights.fill.intensity *= flicker;
     }
 
     // Strobe flash at extreme multipliers — sine-gate at 28Hz

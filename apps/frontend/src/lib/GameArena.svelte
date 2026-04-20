@@ -29,6 +29,7 @@
     },
     lossAmount = 0,
     onRestart = () => {},
+    onViewStats = () => {},
     children,
   }: {
     arenaStatus?: ArenaBroadcastStatus;
@@ -48,6 +49,7 @@
     };
     lossAmount?: number;
     onRestart?: () => void;
+    onViewStats?: () => void;
     children: Snippet;
   } = $props();
 
@@ -100,6 +102,30 @@
 
   // Stadium light flicker timing (only at mid-high multipliers)
   const flickerActive = $derived(isLive && accumulatedMult >= 4);
+
+  // ─── Between-ball broadcast: two-stage result card ───
+  let resultStage = $state(0); // 0=off, 1=show result text, 2=show multiplier
+
+  $effect(() => {
+    if (arenaStatus !== 'result') { resultStage = 0; return; }
+    resultStage = 1;
+    const t = setTimeout(() => { resultStage = 2; }, 1750);
+    return () => clearTimeout(t);
+  });
+
+  const resultIsSix  = $derived(commentaryText.includes('SIX') || commentaryText.includes('MAXIMUM'));
+  const resultIsFour = $derived(commentaryText.includes('FOUR') || commentaryText.includes('BOUNDARY'));
+  const resultIsWicket = $derived(commentaryText.includes('BOWLED') || commentaryText.includes('OUT') || commentaryText.includes('STUMPS'));
+  const resultColor = $derived(
+    resultIsWicket ? '#ff1e3c' :
+    resultIsSix    ? '#ffc800' :
+    resultIsFour   ? '#00ff88' : 'rgba(255,255,255,0.85)'
+  );
+  const resultColorRgb = $derived(
+    resultIsWicket ? '255,30,60' :
+    resultIsSix    ? '255,200,0' :
+    resultIsFour   ? '0,255,136' : '255,255,255'
+  );
 </script>
 
 <div
@@ -231,7 +257,7 @@
       </div>
     </div>
 
-    <!-- Center: Commentary / waiting state -->
+    <!-- Center: Commentary / waiting state / between-ball broadcast -->
     <div class="flex-1 flex items-center justify-center">
       {#if arenaStatus === 'waiting'}
         <div class="flex flex-col items-center gap-4">
@@ -241,12 +267,48 @@
             </span>
           </div>
         </div>
-      {:else if arenaStatus === 'bowling' || arenaStatus === 'hitting' || arenaStatus === 'result'}
+      {:else if arenaStatus === 'bowling' || arenaStatus === 'hitting'}
         <CommentaryBanner
           text={commentaryText}
           {commentaryKey}
           {streak}
         />
+      {:else if arenaStatus === 'result' && resultStage > 0}
+        <div class="broadcast-card">
+          <!-- Stage 1: result text -->
+          {#if resultStage === 1}
+            {#key commentaryKey}
+              <div class="bc-stage bc-stage-enter">
+                <div class="bc-ball-label">BALL {currentBallIdx + 1} &nbsp;·&nbsp; RESULT</div>
+                <div
+                  class="bc-outcome"
+                  style="color: {resultColor}; border-color: rgba({resultColorRgb},0.3); text-shadow: 0 0 30px rgba({resultColorRgb},0.8), 0 0 60px rgba({resultColorRgb},0.3);"
+                >
+                  {commentaryText}
+                </div>
+                {#if streak >= 2}
+                  <div class="bc-streak">🔥 {streak} IN A ROW</div>
+                {/if}
+              </div>
+            {/key}
+          {/if}
+
+          <!-- Stage 2: multiplier focus -->
+          {#if resultStage === 2}
+            {#key commentaryKey + 99}
+              <div class="bc-stage bc-stage-enter bc-mult-stage">
+                <div class="bc-ball-label">ACCUMULATED MULTIPLIER</div>
+                <div
+                  class="bc-mult"
+                  style="color: {accentColor}; text-shadow: 0 0 50px rgba({accentRgb},0.9), 0 0 100px rgba({accentRgb},0.4);"
+                >
+                  {accumulatedMult.toFixed(2)}<span class="bc-mult-x">×</span>
+                </div>
+                <div class="bc-next-hint">Next ball loading…</div>
+              </div>
+            {/key}
+          {/if}
+        </div>
       {/if}
     </div>
 
@@ -258,7 +320,7 @@
 
   <!-- ─── Wicket Overlay (during wicket animation phase only) ─── -->
   {#if isCrashed}
-    <MatchOverOverlay multiplier={accumulatedMult} lossAmount={lossAmount} onClose={onRestart} />
+    <MatchOverOverlay multiplier={accumulatedMult} lossAmount={lossAmount} onClose={onRestart} {onViewStats} />
   {/if}
 
   <!-- ─── Post-round Scorecard (during broadcast phase) ─── -->
@@ -334,6 +396,92 @@
   /* ─── Impact flash ─── */
   .impact-flash {
     animation: impact-flash 0.6s ease-out forwards;
+  }
+
+  /* ─── Between-ball broadcast card ─── */
+  .broadcast-card {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+
+  .bc-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    text-align: center;
+  }
+
+  .bc-stage-enter {
+    animation: bc-in 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  @keyframes bc-in {
+    from { opacity: 0; transform: scale(0.8) translateY(22px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  .bc-ball-label {
+    font-size: 0.6rem;
+    font-weight: 900;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.32);
+  }
+
+  .bc-outcome {
+    font-size: 2rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.7rem 1.8rem;
+    background: rgba(0,0,0,0.55);
+    border-radius: 1rem;
+    border: 1px solid;
+    backdrop-filter: blur(12px);
+    line-height: 1.1;
+  }
+
+  .bc-streak {
+    font-size: 0.7rem;
+    font-weight: 900;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #ffc800;
+    text-shadow: 0 0 12px rgba(255,200,0,0.7);
+  }
+
+  .bc-mult-stage {
+    gap: 0.5rem;
+  }
+
+  .bc-mult {
+    font-size: 5.5rem;
+    font-weight: 900;
+    line-height: 1;
+    letter-spacing: -0.03em;
+  }
+
+  .bc-mult-x {
+    font-size: 2.4rem;
+    opacity: 0.55;
+    margin-left: 0.15rem;
+  }
+
+  .bc-next-hint {
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.2);
+    animation: bc-blink 1s ease-in-out infinite;
+  }
+
+  @keyframes bc-blink {
+    0%, 100% { opacity: 0.2; }
+    50%       { opacity: 0.6; }
   }
 
 </style>

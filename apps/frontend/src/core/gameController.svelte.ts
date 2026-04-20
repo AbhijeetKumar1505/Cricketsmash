@@ -183,14 +183,18 @@ function handlePlaybackTick(s: PlaybackState) {
   game.displayMultiplier = s.multiplier;
   game.elapsedMs = s.elapsedMs;
   game.phaseProgress = s.phaseProgress;
-  
+
+  // Populate overSummary immediately when celebrate/wicket begins so the
+  // between-ball broadcast card can display the outcome straight away.
+  if ((s.phase === 'celebrate' || s.phase === 'wicket') && !game.overSummary[s.ballIndex]) {
+    const outcome = game.currentDeliveries[s.ballIndex]?.outcome;
+    if (outcome) game.overSummary[s.ballIndex] = outcome as any;
+  }
+
   if (s.ballIndex !== game.currentBallIdx) {
-    // A ball just completed, update the summary list
     const prevIdx = game.currentBallIdx;
     const outcome = game.currentDeliveries[prevIdx]?.outcome;
-    if (outcome) {
-      game.overSummary[prevIdx] = outcome as any;
-    }
+    if (outcome) game.overSummary[prevIdx] = outcome as any;
     game.currentBallIdx = s.ballIndex;
     game.bowlerType = game.currentDeliveries[s.ballIndex]?.bowlerType || 'Fast';
   }
@@ -222,13 +226,13 @@ export async function cashout(): Promise<void> {
     const finalBalance = await client.endRound();
     game.balance = ParseAmount(finalBalance.amount);
     
-    // Record history
+    // Record history based on ACTUAL multiplier at cashout, not predicted final
+    const userMult = game.displayMultiplier / Math.max(0.01, game.entryMultiplier);
     const apiAmount = Math.round(game.betAmount * API_MULTIPLIER);
-    void finalizeRound(game.payoutMultiplier, apiAmount, true);
+    void finalizeRound(userMult, apiAmount, true);
 
     game.betActive = false;
     game.canCashout = false;
-    // DO NOT stop playback or change phase to 'result'
   } catch (err) {
     console.error('[GameController] Cashout failed:', err);
   }
@@ -243,7 +247,10 @@ async function finalizeRound(mult: number, betAmountApi: number, alreadyEnded = 
       game.balance = ParseAmount(finalBalance.amount);
     }
 
-    const payout = mult > 0 ? Math.floor(betAmountApi * mult) : 0;
+    // High-stakes safe multiplication within micro-units
+    // Use BigInt if amounts exceed safe integers, but here we stay within ~9e15 
+    const payout = mult > 0 ? Math.floor(Number(BigInt(betAmountApi) * BigInt(Math.round(mult * 10000))) / 10000) : 0;
+    
     historyCounter++;
     game.roundHistory = [
       {
@@ -263,6 +270,7 @@ async function finalizeRound(mult: number, betAmountApi: number, alreadyEnded = 
 
 export function returnToIdle(): void {
   game.phase = 'idle';
+  game.visualPhase = 'idle';
   game.displayMultiplier = 1;
   game.entryMultiplier = 1;
   game.sessionActive = false;
@@ -270,6 +278,11 @@ export function returnToIdle(): void {
   game.currentDeliveries = [];
   game.overSummary = [];
   game.currentBallIdx = 0;
+}
+
+/** Dismiss the wicket overlay without resetting session — leaves broadcast phase so scorecard shows. */
+export function dismissMatchOverlay(): void {
+  game.visualPhase = 'idle';
 }
 
 /**

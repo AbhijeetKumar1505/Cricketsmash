@@ -2,14 +2,16 @@
   import { onMount } from 'svelte';
   import { gsap } from 'gsap';
 
-  let { 
-    multiplier = 0, 
+  let {
+    multiplier = 0,
     lossAmount = 0,
-    onClose = () => {} 
+    onClose = () => {},
+    onViewStats = () => {},
   } = $props<{
     multiplier: number;
     lossAmount: number;
     onClose: () => void;
+    onViewStats: () => void;
   }>();
 
   let container = $state<HTMLElement>();
@@ -98,7 +100,8 @@
       >
         RETURN TO LOBBY
       </button>
-      <button 
+      <button
+        onclick={onViewStats}
         class="px-12 py-5 bg-surface-container-highest text-primary font-headline font-black rounded-2xl border border-outline-variant/20 hover:bg-surface-bright active:scale-95 transition-all"
       >
         VIEW FULL STATS

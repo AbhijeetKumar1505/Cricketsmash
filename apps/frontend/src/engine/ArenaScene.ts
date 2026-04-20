@@ -12,6 +12,7 @@ import { LightingSystem } from './LightingSystem';
 import { BallSystem } from './BallSystem';
 import { CrowdSystem } from './CrowdSystem';
 import { LedBannerSystem } from './arena/ledBanners';
+import { SponsorBannerSystem } from './arena/sponsorBanners';
 import { createStadiumStructure, type StadiumStructure } from './arena/stadiumStructure';
 import type { EngineProps } from './CricketWebGLEngine.js';
 
@@ -31,6 +32,7 @@ export class ArenaScene {
   private ballSystem: BallSystem;
   private crowdSystem: CrowdSystem;
   private ledBanners: LedBannerSystem;
+  private sponsorBanners: SponsorBannerSystem;
   private stadiumStructure: StadiumStructure;
   private bloomPass: UnrealBloomPass;
 
@@ -38,6 +40,8 @@ export class ArenaScene {
   private lastT = performance.now() / 1000;
   private time = 0;
   private props: EngineProps;
+  private prevPhase: string = 'idle';
+  private prevTrajectory: string = 'neutral';
   private disposeRenderer: () => void;
 
   constructor(canvas: HTMLCanvasElement, width: number, height: number, initialProps: EngineProps) {
@@ -60,9 +64,13 @@ export class ArenaScene {
     this.ballSystem = new BallSystem(this.scene);
     this.crowdSystem = new CrowdSystem(this.scene);
 
-    // LED banners around the boundary
+    // LED banners (multiplier display)
     this.ledBanners = new LedBannerSystem();
     this.scene.add(this.ledBanners.group);
+
+    // Sponsor LED ribbon (parody brands)
+    this.sponsorBanners = new SponsorBannerSystem();
+    this.scene.add(this.sponsorBanners.group);
 
     // Stadium bowl, boundary boards, floodlight masts
     this.stadiumStructure = createStadiumStructure();
@@ -90,7 +98,6 @@ export class ArenaScene {
 
   updateProps(p: EngineProps) {
     this.props = p;
-    // CameraSystem.setPerspective is a no-op — POVSystem drives perspective
     this.cameraSystem.setPerspective(p.perspective);
   }
 
@@ -109,13 +116,25 @@ export class ArenaScene {
 
     const ph = this.props.phase;
     const mult = this.props.multiplier;
+    const traj = this.props.hitTrajectory;
+    const runs = this.props.runs;
 
-    // Systems that don't need cross-system data
+    // ── Transition detection ──
+    if (ph !== this.prevPhase) {
+      this.onPhaseTransition(this.prevPhase, ph, traj, runs, mult);
+      this.prevPhase = ph;
+    }
+
+    if (ph === 'hit' && traj !== this.prevTrajectory) {
+      this.onTrajectoryChange(traj, runs);
+      this.prevTrajectory = traj;
+    }
+
+    // ── Updates ──
     this.lightingSystem.update(dt, this.time, this.props);
     this.ballSystem.update(dt, this.time, this.props);
     this.crowdSystem.update(dt, this.time, this.props);
 
-    // Sync ball point light from ball system output
     const ballPos = this.ballSystem.getBallWorldPos();
     const frame = this.ballSystem.getLastFrame();
     if (frame) {
@@ -125,16 +144,13 @@ export class ArenaScene {
       lights.ballPoint.intensity = frame.glowStrength * 42;
     }
 
-    // Camera needs ball world position for ball_follow orbit
     this.cameraSystem.update(dt, this.time, this.props, ballPos);
 
-    // LED banners: show multiplier during active play
-    if (ph === 'hit') {
-      this.ledBanners.showMultiplier(mult);
-    }
+    if (ph === 'hit') this.ledBanners.showMultiplier(mult);
     this.ledBanners.update(dt, ph);
+    this.sponsorBanners.update(dt, ph);
 
-    // Reactive bloom: blooms up with multiplier during hit phase
+    // Reactive bloom
     this.bloomPass.strength = ph === 'hit'
       ? 0.35 + Math.min(1.4, mult * 0.038)
       : 0.35;
@@ -143,12 +159,48 @@ export class ArenaScene {
     this.composer.render();
   }
 
+  private onPhaseTransition(_prevPh: string, newPh: string, traj: string, runs: number, _mult: number) {
+    switch (newPh) {
+      case 'hit':
+        if (traj === 'six') {
+          this.sponsorBanners.triggerEvent('six');
+          this.lightingSystem.triggerFlicker();
+        } else if (traj === 'four') {
+          this.sponsorBanners.triggerEvent('four');
+        } else if (runs === 0) {
+          this.sponsorBanners.triggerEvent('miss');
+        }
+        break;
+
+      case 'wicket':
+        this.sponsorBanners.triggerEvent('wicket');
+        this.lightingSystem.triggerFlicker();
+        break;
+
+      case 'celebrate':
+        this.lightingSystem.triggerFlicker();
+        break;
+    }
+  }
+
+  private onTrajectoryChange(traj: string, runs: number) {
+    if (traj === 'six') {
+      this.sponsorBanners.triggerEvent('six');
+      this.lightingSystem.triggerFlicker();
+    } else if (traj === 'four') {
+      this.sponsorBanners.triggerEvent('four');
+    } else if (runs === 0) {
+      this.sponsorBanners.triggerEvent('miss');
+    }
+  }
+
   dispose() {
     cancelAnimationFrame(this.rafId);
     this.cameraSystem.dispose();
     this.ballSystem.dispose();
     this.crowdSystem.dispose();
     this.ledBanners.dispose();
+    this.sponsorBanners.dispose();
     this.stadiumStructure.dispose();
     this.disposeRenderer();
   }

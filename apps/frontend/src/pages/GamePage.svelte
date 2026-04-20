@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { game, placeBet, cashout, returnToIdle, setBetAmount, setGameMode, type VisualPhase } from '../core/gameController.svelte.js';
+  import { game, placeBet, cashout, returnToIdle, dismissMatchOverlay, setBetAmount, setGameMode, type VisualPhase } from '../core/gameController.svelte.js';
   import CricketSimulation from '../lib/CricketSimulation.svelte';
   import GameArena from '../lib/GameArena.svelte';
   import {
@@ -58,7 +58,7 @@
     return s;
   });
 
-  // ─── Commentary: phase + current delivery outcome → text ───
+  // ─── Commentary: phase + outcome → clean broadcast text ───
   const commentaryKey = $derived(game.deliveryKey * 10 + game.currentBallIdx);
   const commentaryText = $derived.by(() => {
     const phase = game.visualPhase;
@@ -67,11 +67,12 @@
     if (!outcome) return '';
     const seed = game.deliveryKey * 7 + game.currentBallIdx;
     if (outcome.kind === 'wicket') {
-      return (['TIMBER! BOWLED!', 'OUT!! CLEAN BOWLED!', 'STUMPS ARE FLYING!', "THAT'S OUT!"] as const)[seed % 4]!;
+      return (['BOWLED OUT!', 'CLEAN BOWLED!', 'STUMPS SHATTERED!', 'OUT!!'] as const)[seed % 4]!;
     }
-    if (outcome.runs === 6) return (['MAXIMUM! SIX!', 'OVER THE ROPE!', 'CROWD ERUPTS!', 'WHAT A HIT!'] as const)[seed % 4]!;
-    if (outcome.runs === 4) return (['BOUNDARY! FOUR!', 'CRACKING DRIVE!', 'SMASHED TO THE FENCE!', 'MAGNIFICENT!'] as const)[seed % 4]!;
-    if (outcome.runs >= 2) return (['GOOD RUNNING!', 'TWO MORE RUNS!', 'SHARP CRICKET!'] as const)[seed % 3]!;
+    if (outcome.runs === 6) return (['MAXIMUM! SIX!', 'OVER THE ROPE!', "THAT'S A SIX!", 'HUGE MAXIMUM!'] as const)[seed % 4]!;
+    if (outcome.runs === 4) return (['BOUNDARY! FOUR!', 'TO THE FENCE!', 'CRACKING DRIVE!', 'MAGNIFICENT FOUR!'] as const)[seed % 4]!;
+    if (outcome.runs === 3) return (['THREE RUNS!', 'GOOD RUNNING!', 'THREE!'] as const)[seed % 3]!;
+    if (outcome.runs === 2) return (['TWO RUNS!', 'QUICK TWO!', 'WELL RUN!'] as const)[seed % 3]!;
     if (outcome.runs === 1) return (['QUICK SINGLE!', 'ONE RUN!', 'GOOD CALL!'] as const)[seed % 3]!;
     return (['DOT BALL.', 'WELL DEFENDED!', 'TIGHT BOWLING!'] as const)[seed % 3]!;
   });
@@ -80,7 +81,7 @@
   const scorecardData = $derived.by(() => {
     if (game.phase !== 'broadcast') return null;
     const mult_val = game.payoutMultiplier;
-    const bet = localBet;
+    const bet = game.betAmount;
     const wasWicket = game.overSummary.some(s => s?.kind === 'wicket');
     return {
       history:   game.overSummary,
@@ -141,7 +142,7 @@
   const currentPayout = $derived.by(() => {
     if (!game.betActive) return 0;
     const profitMult = game.displayMultiplier / Math.max(0.01, game.entryMultiplier);
-    return localBet * profitMult;
+    return game.betAmount * profitMult;
   });
 
   // ─── React to visual phase changes for audio/events ───
@@ -263,8 +264,9 @@
         {commentaryKey}
         {streak}
         {scorecardData}
-        lossAmount={localBet}
+        lossAmount={game.betAmount}
         onRestart={returnToIdle}
+        onViewStats={dismissMatchOverlay}
       >
         <CricketSimulation
           phase={game.visualPhase}
@@ -275,6 +277,7 @@
           deliveryKey={game.deliveryKey}
           phaseProgress={game.phaseProgress}
           shotType={currentShotType}
+          shotLabel={commentaryText}
         />
       </GameArena>
 
