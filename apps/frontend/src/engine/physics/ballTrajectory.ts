@@ -2,15 +2,8 @@ import { SIM } from '../layout.js';
 
 export type SimPhase = 'idle' | 'bowl' | 'hit' | 'wicket' | 'celebrate';
 
-function lerp(a: number, b: number, t: number) {
-  return a + (b - a) * t;
-}
-function clamp(v: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, v));
-}
-function easeOut(t: number) {
-  return 1 - (1 - t) * (1 - t);
-}
+function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }
 
 export type BowlerType = 'Fast' | 'Spin' | 'Swing';
 
@@ -37,8 +30,14 @@ export interface BallFrame {
 }
 
 /**
- * Time-normalised ball state in legacy screen space. Deterministic from phase + inputs
- * (no RNG) — Stake / server results drive phase only.
+ * EXACT DOODLE SIMULATION MODEL
+ * Scripted Curve + Deterministic Timing Gate
+ * 
+ * Timeline (from Bowler Start):
+ * 0.0s -> Run up
+ * 0.6s -> Release
+ * 1.2s -> Bounce
+ * 1.6s -> HIT WINDOW
  */
 export function computeBallFrame(p: TrajectoryParams): BallFrame {
   const ph = p.phase;
@@ -52,134 +51,94 @@ export function computeBallFrame(p: TrajectoryParams): BallFrame {
   let bAlpha = 1;
   let bScale = 1;
   let spinRate = 0;
-  let glowRgb: [number, number, number] = [1, 0.25, 0.2];
-  let glowStrength = 0.12;
+  let glowRgb: [number, number, number] = [1, 1, 1];
+  let glowStrength = 0.1;
 
   if (ph === 'idle') {
-    bx = p.bowlerX + 14;
-    by = SIM.GY - 48;
-    bAlpha = 0.8;
-    spinRate = 0;
+    bx = p.bowlerX + 18;
+    by = SIM.GY - 45;
+    bAlpha = 0.5;
   } else if (ph === 'bowl') {
-    const releaseAt = 0.74;
+    // 0.0s -> 0.6s is Bowler Run Up (pp < 0.375 if phLen=1.6)
+    // But we use pp relative to phaseLen. 
+    // To reach hit window at 1.6s, bowl phase must be 1.6s.
+    const releaseAt = 0.375; // 0.6 / 1.6
+    
     if (pp < releaseAt) {
-      // Run-up: follow the bowler's hand (simulated local offset)
+      // Ball in bowler's hand
       bx = p.bowlerX + 22;
-      // Dip and rise with the arm swing
-      const swing = Math.sin(pp * Math.PI * 2.5);
-      by = SIM.GY - 52 + swing * 8;
-      bAlpha = pp < 0.3 ? 0 : clamp((pp - 0.3) / 0.2, 0, 1);
-      spinRate = 0;
+      const handSwing = Math.sin((pp/releaseAt) * Math.PI * 2);
+      by = SIM.GY - 52 + handSwing * 10;
+      bAlpha = clamp((pp - 0.1) * 10, 0, 1);
     } else {
-      const fp = clamp((pp - releaseAt) / (1.0 - releaseAt), 0, 1);
-      const relX = p.bowlerX + 8;
-      const relY = SIM.BALL_RELEASE_Y - 6;
-      const bounceAt = bType === 'Fast' ? 0.38 : bType === 'Swing' ? 0.44 : 0.52;
+      // Flight Progress (0.0 to 1.0) from release to hit window
+      const fp = (pp - releaseAt) / (1.0 - releaseAt);
+      
+      // 1. Z-equivalent (Longitudinal)
+      // Map fp to longitudinal movement
+      bx = lerp(SIM.CX_BOWL, SIM.CX_BAT, fp);
 
-      if (fp < bounceAt) {
-        const u = fp / bounceAt;
-        bx = lerp(relX, SIM.BALL_BOUNCE_X, u);
-        const gravY = relY + (SIM.BALL_BOUNCE_Y - relY) * (u * u);
-        if (bType === 'Spin') {
-          by = gravY - 4 * 34 * u * (1 - u); // True quadratic gravity parabola
-        } else if (bType === 'Swing') {
-          by = gravY - Math.pow(u, 3) * 22 - 4 * 10 * u * (1 - u); // Complex spin drift
-        } else {
-          by = gravY - 4 * 5 * u * (1 - u);
-        }
-        bScale = lerp(0.55, 0.88, u);
-        bAlpha = clamp(fp / 0.07, 0, 1);
+      // 2. X Swing Curve (Scripted Sine)
+      const swingAmp = bType === 'Swing' ? 0.6 : bType === 'Spin' ? 0.4 : 0.1;
+      const swingX = Math.sin(fp * Math.PI) * swingAmp * 60; 
+      bx += swingX;
+
+      // 3. Y Arc (Scripted Bounce)
+      // Bounce occurs at 1.2s (pp = 0.75, which is fp = 0.6 relative to release)
+      // Actually the prompt says progress < 0.5 is descent.
+      // 0.6 to 1.6 duration is 1.0s. Midpoint is 1.1s. 
+      // Bounce at 1.2s is 0.6 into the 1.0s flight.
+      const bounceFp = 0.6; 
+      if (fp < bounceFp) {
+        const u = fp / bounceFp;
+        by = lerp(SIM.BALL_RELEASE_Y, SIM.BALL_BOUNCE_Y, u * u);
       } else {
-        const u = clamp((fp - bounceAt) / (1.0 - bounceAt), 0, 1);
-        bx = lerp(SIM.BALL_BOUNCE_X, SIM.BALL_AT_BAT_X, easeOut(u));
-        const bounceH = bType === 'Fast' ? 42 : bType === 'Swing' ? 62 : 90;
-        const peakY = SIM.BALL_BOUNCE_Y - bounceH;
-        by =
-          (1 - u) * (1 - u) * SIM.BALL_BOUNCE_Y +
-          2 * (1 - u) * u * peakY +
-          u * u * SIM.BALL_AT_BAT_Y;
-        if (bType === 'Spin') {
-          bx += 4 * 16 * u * (1 - u); // Deviation width path
-        }
-        bScale = lerp(0.9, 1.28, u);
-        bAlpha = 1;
+        const u = (fp - bounceFp) / (1.0 - bounceFp);
+        const bounceH = bType === 'Fast' ? 45 : 75;
+        by = SIM.BALL_BOUNCE_Y - Math.sin(u * Math.PI) * bounceH + lerp(0, SIM.BALL_AT_BAT_Y - SIM.BALL_BOUNCE_Y, u);
       }
-      spinRate = bType === 'Spin' ? 13 : bType === 'Fast' ? 8 : 6;
-      const gc = bType === 'Fast' ? [1, 0.33, 0.2] : bType === 'Swing' ? [0.27, 0.53, 1] : [1, 0.8, 0.27];
-      glowRgb = gc as [number, number, number];
-      glowStrength = 0.14;
+      spinRate = 25;
     }
   } else if (ph === 'hit') {
-    const distFactor = Math.log(Math.max(1.001, mult)) * 80;
-
+    const dist = Math.log10(Math.max(1, mult)) * 180;
+    
     if (traj === 'six') {
-      bx = SIM.BALL_AT_BAT_X + distFactor * 2.5;
-      by = SIM.BALL_AT_BAT_Y - Math.sin(Math.min(pp, 1) * Math.PI) * 120 - distFactor * 0.5;
-      bScale = 1.05 + pp * 0.4;
-      glowRgb = [1, 0.87, 0];
-      glowStrength = 0.22 + mult * 0.05;
+      bx = SIM.BALL_AT_BAT_X + pp * (450 + dist);
+      by = SIM.BALL_AT_BAT_Y - Math.sin(pp * Math.PI) * (280 + dist * 0.5);
+      bScale = 1.0 + pp * 1.5;
+      glowRgb = [1, 0.9, 0.1];
+      glowStrength = 0.7;
     } else if (traj === 'four') {
-      bx = SIM.BALL_AT_BAT_X + distFactor * 3.2;
-      // Drop from bat contact height to GROUND (SIM.GY) quickly, then bounce at ground level
-      const groundReach = easeOut(clamp(pp * 5, 0, 1));
-      const bounceU = (pp * 2.8) % 1.0;
-      const bounceAmp = 22 * Math.exp(-pp * 1.2); // decaying bounce height
-      by = lerp(SIM.BALL_AT_BAT_Y, SIM.GY, groundReach)
-         - 4 * bounceAmp * bounceU * (1 - bounceU) * groundReach;
-      bScale = 1.05;
-      glowRgb = [1, 0.52, 0.2];
-      glowStrength = 0.18 + mult * 0.02;
+      bx = SIM.BALL_AT_BAT_X + pp * (300 + dist);
+      const bounceCount = 3;
+      const bounceU = (pp * bounceCount) % 1.0;
+      const bounceAmp = 60 * Math.exp(-pp * 1.5);
+      by = lerp(SIM.BALL_AT_BAT_Y, SIM.GY, clamp(pp * 2.5, 0, 1)) - Math.abs(Math.sin(bounceU * Math.PI)) * bounceAmp;
+      glowRgb = [1, 0.7, 0.2];
     } else {
-      bx = SIM.BALL_AT_BAT_X + distFactor * 1.8;
-      // Ball drops to ground quickly then rolls with small decaying bounces
-      const groundReach = easeOut(clamp(pp * 4, 0, 1));
-      const softBounce = 8 * Math.exp(-pp * 3) * Math.max(0, Math.sin(pp * Math.PI * 2.5));
-      by = lerp(SIM.BALL_AT_BAT_Y, SIM.GY, groundReach) - softBounce * groundReach;
-      glowRgb = [1, 0.4, 0.25];
-      glowStrength = 0.15 + mult * 0.01;
+      bx = SIM.BALL_AT_BAT_X + pp * 180;
+      by = lerp(SIM.BALL_AT_BAT_Y, SIM.GY, clamp(pp * 4, 0, 1)) - Math.abs(Math.sin(pp * 15)) * 20 * Math.exp(-pp * 2);
     }
-    spinRate = 7 + mult;
+    spinRate = 45;
   } else if (ph === 'wicket') {
-    const u = clamp(pp * 2.4, 0, 1);
-    bx = lerp(SIM.BALL_AT_BAT_X, SIM.CX_BAT + 14, u);
-    by = lerp(SIM.BALL_AT_BAT_Y, SIM.PY2 - 4, u);
-    bAlpha = Math.max(0, 1 - pp * 1.6);
-    glowRgb = [1, 0, 0];
-    glowStrength = 0.4;
-  }
- else if (ph === 'celebrate') {
-    const u = p.t * 2.8;
-    const orb = traj === 'six' ? 72 : 50;
-    bx = SIM.BAT_X - 25 + Math.cos(u) * orb;
-    by = 178 + Math.sin(u * 0.85) * 28;
-    bScale = traj === 'six' ? 1.35 : 1.18;
-    glowRgb = [0.4, 1, 0.8];
-    glowStrength = 0.2;
-    spinRate = 7;
+    const u = clamp(pp * 2, 0, 1);
+    bx = lerp(SIM.BALL_AT_BAT_X, SIM.CX_BAT - 60, u);
+    by = SIM.BALL_AT_BAT_Y - Math.sin(u * Math.PI) * 45;
+    bAlpha = 1 - (pp > 0.6 ? (pp - 0.6) * 2.5 : 0);
+    glowRgb = [1, 0.1, 0.1];
+    glowStrength = 0.6;
   }
 
-  return {
-    bx,
-    by,
-    bScale,
-    bAlpha,
-    spinRate,
-    glowRgb,
-    glowStrength,
-  };
+  return { bx, by, bScale, bAlpha, spinRate, glowRgb, glowStrength };
 }
 
 /**
- * Frontend animation duration for each phase.
- * Note: 'hit' duration is now dynamic (driven by playbackEngine and multiplier growth),
- * so this value is a fallback or represents the minimum time for the 'hit' animation.
+ * EXACT DOODLE TIMING
  */
-export function phaseLength(phase: SimPhase, bowlerType: BowlerType): number {
-  if (phase === 'bowl') {
-    return bowlerType === 'Fast' ? 1.2 : bowlerType === 'Swing' ? 1.45 : 1.8;
-  }
-  if (phase === 'hit') return 10.0; // Allow it to fly for a long time
-  if (phase === 'wicket') return 1.5;
-  if (phase === 'celebrate') return 2.0;
-  return 1.6;
+export function phaseLength(phase: SimPhase, _bowlerType: BowlerType): number {
+  if (phase === 'bowl') return 1.6; // Bowler Start (0.0) to Hit Window (1.6)
+  if (phase === 'hit') return 1.2;  // Follow through
+  if (phase === 'wicket') return 1.0;
+  if (phase === 'celebrate') return 1.5;
+  return 1.0;
 }

@@ -1,6 +1,23 @@
 import { payoutMultiplierToCricketOutcome } from '@cricket-crash/fairness';
 import type { CricketOutcome } from '@cricket-crash/types';
-import { createPlaybackEngine, type VisualPhase } from './playbackEngine.js';
+import type { EngineBridge } from '../bridge/EngineBridge.js';
+
+// Module-level bridge reference — set by CricketSimulation.svelte via bindBridge()
+let _bridge: EngineBridge | null = null;
+// Prevents duplicate setCallbacks() calls if both initGame and bindBridge fire
+let _callbacksRegistered = false;
+
+/**
+ * Called by CricketSimulation.svelte after creating the EngineBridge.
+ * Also re-registers callbacks immediately, because initGame() runs before
+ * CricketSimulation mounts (game.phase starts 'initializing', so the 3D
+ * canvas isn't rendered yet when initGame calls setupBridgeCallbacks).
+ */
+export function bindBridge(b: EngineBridge): void {
+  _bridge = b;
+  _callbacksRegistered = false;   // fresh bridge instance
+  setupBridgeCallbacks();
+}
 import {
   StakeGameClient,
   JurisdictionFlags,
@@ -9,10 +26,10 @@ import {
 } from './stakeClient.js';
 import type { BowlerType } from '../engine/physics/ballTrajectory.js';
 import { ParseAmount, API_MULTIPLIER, GAME_MODES } from './stakeClient.js';
-import type { PlaybackState } from './playbackEngine.js';
 import { generateDeliveries, type Delivery } from './modeEngine.js';
 
-export type { VisualPhase } from './playbackEngine.js';
+export type HitQuality = 'perfect' | 'good' | 'edge' | 'miss' | 'none';
+export type VisualPhase = 'idle' | 'bowl' | 'hit' | 'wicket' | 'celebrate';
 
 export type DeliveryOutcome = { kind: 'runs'; runs: number } | { kind: 'wicket' } | null;
 
@@ -23,6 +40,7 @@ export type GamePhase =
   | 'animating' // Session is active
   | 'broadcast' // Post-over/wicket display phase
   | 'error';
+
 
 export interface RoundHistoryEntry {
   id: number;
@@ -68,11 +86,12 @@ export const game = $state({
   betActive: false, // Is the user currently in a bet?
   sessionActive: false, // Is the over currently playing?
   overSummary: [] as DeliveryOutcome[],
+  isSwinging: false,
+  hitQuality: 'none' as 'perfect' | 'good' | 'edge' | 'miss' | 'none',
 });
 
 // ── Internal state ──────────────────────────────────────────────────────────
 let client: StakeGameClient | null = null;
-const playback = createPlaybackEngine();
 let historyCounter = 0;
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -112,11 +131,25 @@ export async function initGame(): Promise<void> {
     game.jurisdictionFlags = authResult.jurisdiction;
 
     game.phase = 'idle';
+    setupBridgeCallbacks();
   } catch (err) {
     game.phase = 'error';
     game.errorMessage = err instanceof Error ? err.message : 'Failed to connect to game server';
     console.error('[GameController] Init failed:', err);
   }
+}
+
+export async function swing(): Promise<void> {
+  // Only allow swing during bowling phase
+  if (game.visualPhase !== 'bowl') return;
+  if (game.isSwinging) return;
+  
+  game.isSwinging = true;
+  
+  // Trigger the 3D Engine to swing
+  _bridge?.triggerSwing();
+  
+  console.log('[GameController] Swung!');
 }
 
 export async function placeBet(): Promise<void> {
@@ -150,11 +183,9 @@ export async function placeBet(): Promise<void> {
       game.deliveryKey++;
       game.phase = 'animating';
       
-      playback.start(
-        game.currentDeliveries,
-        (s: PlaybackState) => handlePlaybackTick(s),
-        (finalMult: number) => handleSessionEnd(finalMult)
-      );
+      // Bowl the first pre-planned delivery.
+      const first = newSeq[0];
+      _bridge?.triggerBowl(first ? makeEngineOutcome(first) : undefined);
     } else {
       // Joining current session
       // We overwrite the FUTURE deliveries with the new result
@@ -163,7 +194,7 @@ export async function placeBet(): Promise<void> {
         updatedDeliveries[startIdx + i] = newSeq[i]!;
       }
       game.currentDeliveries = updatedDeliveries;
-      playback.updateDeliveries(game.currentDeliveries);
+      // bridge.updateDeliveries(game.currentDeliveries); // To be implemented if mid-session changing needed in 3D
       
       game.entryMultiplier = game.displayMultiplier;
     }
@@ -178,26 +209,129 @@ export async function placeBet(): Promise<void> {
   }
 }
 
-function handlePlaybackTick(s: PlaybackState) {
-  game.visualPhase = s.phase;
-  game.displayMultiplier = s.multiplier;
-  game.elapsedMs = s.elapsedMs;
-  game.phaseProgress = s.phaseProgress;
+// Convert a modeEngine Delivery to the engine's DeliveryOutcome for triggerBowl().
+function makeEngineOutcome(delivery: Delivery) {
+  if (!_bridge) return undefined;
+  const isWicket = delivery.outcome.kind === 'wicket';
+  return _bridge.makeOutcome(
+    isWicket ? 'wicket' : 'hit',
+    (delivery.bowlerType as string).toLowerCase() as 'fast' | 'spin' | 'swing',
+    isWicket ? 0 : delivery.endMultiplier,
+  );
+}
 
-  // Populate overSummary immediately when celebrate/wicket begins so the
-  // between-ball broadcast card can display the outcome straight away.
-  if ((s.phase === 'celebrate' || s.phase === 'wicket') && !game.overSummary[s.ballIndex]) {
-    const outcome = game.currentDeliveries[s.ballIndex]?.outcome;
-    if (outcome) game.overSummary[s.ballIndex] = outcome as any;
+// Called after each ball result to bowl the next delivery or end the over.
+function advanceBall(): void {
+  // Guard: session may have ended via cashout or wicket before this timer fires.
+  if (!game.sessionActive) return;
+
+  _bridge?.triggerReset();
+
+  const nextIdx = game.currentBallIdx + 1;
+
+  if (nextIdx >= game.currentDeliveries.length) {
+    handleSessionEnd(game.displayMultiplier);
+    return;
   }
 
-  if (s.ballIndex !== game.currentBallIdx) {
-    const prevIdx = game.currentBallIdx;
-    const outcome = game.currentDeliveries[prevIdx]?.outcome;
-    if (outcome) game.overSummary[prevIdx] = outcome as any;
-    game.currentBallIdx = s.ballIndex;
-    game.bowlerType = game.currentDeliveries[s.ballIndex]?.bowlerType || 'Fast';
-  }
+  game.currentBallIdx = nextIdx;
+  const nextDelivery = game.currentDeliveries[nextIdx];
+  _bridge?.triggerBowl(nextDelivery ? makeEngineOutcome(nextDelivery) : undefined);
+}
+
+// Wire engine → game state callbacks. Uses module-level _bridge set by bindBridge().
+function setupBridgeCallbacks() {
+  // Guard: _bridge must exist, and we must not double-register on the same bridge.
+  if (!_bridge || _callbacksRegistered) return;
+  _callbacksRegistered = true;
+
+  _bridge.setCallbacks({
+    onBowlStart: (_bowlerType: string, hitTime: number) => {
+      // New delivery started — clear prior hit state.
+      game.visualPhase = 'bowl';
+      game.isSwinging  = false;
+
+      // Update the 3D scoreboard: show current ball in the session
+      _bridge?.updateScoreboard(
+        game.currentBallIdx,
+        game.currentDeliveries.length || 6,
+        game.displayMultiplier,
+      );
+
+      // Auto-swing: register the swing during the 'bowling' phase so the engine
+      // resolves it the moment the ball reaches the batsman zone (~perfect timing).
+      // Wicket deliveries intentionally skip auto-swing — the ball beats the bat.
+      const delivery = game.currentDeliveries[game.currentBallIdx];
+      if (delivery?.outcome.kind !== 'wicket') {
+        const delay = Math.max(200, hitTime * 600);   // ≈60% of delivery time
+        setTimeout(() => {
+          if (game.sessionActive && !game.isSwinging) {
+            game.isSwinging = true;
+            _bridge?.triggerSwing();
+          }
+        }, delay);
+      }
+    },
+
+    onHitResult: (quality: string) => {
+      game.hitQuality = quality as typeof game.hitQuality;
+      if (quality !== 'miss') {
+        game.visualPhase = 'hit';
+        // Show this delivery's result multiplier immediately on bat contact
+        // so the player sees the number during ball flight, not 4s later.
+        const delivery = game.currentDeliveries[game.currentBallIdx];
+        if (delivery && delivery.outcome.kind !== 'wicket') {
+          game.displayMultiplier = delivery.endMultiplier;
+        }
+      } else {
+        // Wicket — record immediately and end session after brief display.
+        const idx = game.currentBallIdx;
+        const summary = [...game.overSummary];
+        summary[idx] = { kind: 'wicket' };
+        game.overSummary = summary;
+        game.visualPhase = 'wicket';
+        setTimeout(() => {
+          _bridge?.triggerReset();
+          handleSessionEnd(0);
+        }, 2500);
+      }
+    },
+
+    onMultiplier: (_mult: number) => {
+      // No-op: displayMultiplier is updated in onHitResult (on contact)
+      // and confirmed in onRoundEnd. The engine's raw quality-adjusted value
+      // is not used directly — we rely on the pre-planned delivery.endMultiplier.
+    },
+
+    onRoundEnd: (_mult: number, _outcome: string) => {
+      const idx      = game.currentBallIdx;
+      const delivery = game.currentDeliveries[idx];
+
+      if (delivery) {
+        // Record the pre-planned delivery outcome in the over summary.
+        const summary = [...game.overSummary];
+        summary[idx]  = delivery.outcome.kind === 'wicket'
+          ? { kind: 'wicket' as const }
+          : { kind: 'runs'   as const, runs: delivery.outcome.runs };
+        game.overSummary        = summary;
+        game.displayMultiplier  = delivery.endMultiplier;
+      }
+
+      // Refresh the 3D scoreboard with the updated multiplier
+      _bridge?.updateScoreboard(
+        game.currentBallIdx,
+        game.currentDeliveries.length || 6,
+        game.displayMultiplier,
+      );
+
+      game.visualPhase = 'celebrate';
+
+      // Show commentary (resultStage 1) for 1750 ms, then MultiplierDisplay
+      // (resultStage 2) for a further 1750 ms, then bowl next ball.
+      // Total inter-ball gap = 3500 ms.
+      setTimeout(advanceBall, 3500);
+    },
+  });
 }
 
 async function handleSessionEnd(_finalMult: number) {
@@ -311,10 +445,18 @@ export function setGameMode(mode: GameModeName): void {
 }
 
 /**
+ * Sets the playback time scale (used for juice/impact freezes).
+ */
+export function setPlaybackTimeScale(_scale: number): void {
+  // To be re-implemented if needed, but GameLoop now uses constant dt or handles its own trauma
+}
+
+/**
  * Cleanup on unmount.
  */
 export function destroyGame(): void {
-  playback.stop();
+  _bridge = null;
+  _callbacksRegistered = false;
   client?.destroy();
   client = null;
   game.phase = 'initializing';

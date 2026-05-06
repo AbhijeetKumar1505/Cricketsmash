@@ -33,7 +33,7 @@ export const WORLD = {
   /** Ground plane Y. */
   groundY: 0,
   /** Ball radius in world units. */
-  ballRadius: 0.11, // Standardized true 3D scale
+  ballRadius: 0.2, // Standardized true 3D scale
   /** Height scale: screen pixels above ground line → world Y. */
   heightScale: 0.038,
   /** Depth variation/Spread for horizontal deviation. */

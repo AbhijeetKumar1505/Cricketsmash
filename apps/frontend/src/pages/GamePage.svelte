@@ -23,18 +23,7 @@
   let localBet = $state(game.betAmount || 10);
   let autoCashoutVal = $state<number | null>(null);
 
-  // Animation support state
-  let currentBowler = $derived(game.bowlerType);
-  let currentTrajectory = $derived.by(() => {
-    const outcome = game.currentDeliveries[game.currentBallIdx]?.outcome;
-    if (!outcome || outcome.kind === 'wicket') return 'neutral' as 'six' | 'four' | 'neutral';
-    if (outcome.runs === 6) return 'six';
-    if (outcome.runs === 4) return 'four';
-    return 'neutral';
-  });
-  const currentShotType = $derived(
-    game.currentDeliveries[game.currentBallIdx]?.shotType ?? 'defend'
-  );
+
 
   // Sync local → controller only; game.betAmount is never changed externally
   $effect(() => { setBetAmount(localBet); });
@@ -42,7 +31,6 @@
   let mult = $derived(game.displayMultiplier);
   let soundOn = $state(true);
   let lastCashout = $state<string | null>(null);
-  let lastBallResult = $state<number | 'W' | null>(null);
   let pageEl = $state<HTMLElement | undefined>(undefined);
   let passedPageMilestones = new Set<number>();
 
@@ -62,7 +50,7 @@
   const commentaryKey = $derived(game.deliveryKey * 10 + game.currentBallIdx);
   const commentaryText = $derived.by(() => {
     const phase = game.visualPhase;
-    if (phase !== 'hit' && phase !== 'celebrate' && phase !== 'wicket') return '';
+    if (phase !== 'celebrate' && phase !== 'wicket') return '';
     const outcome = game.currentDeliveries[game.currentBallIdx]?.outcome;
     if (!outcome) return '';
     const seed = game.deliveryKey * 7 + game.currentBallIdx;
@@ -200,9 +188,20 @@
 >
   <!-- ─── Broadcast Background ─── -->
   <div class="page-bg" aria-hidden="true">
+    <div class="sky-gradient"></div>
+    <div class="sky-glow sky-glow-left"></div>
+    <div class="sky-glow sky-glow-right"></div>
+    <div class="sky-haze"></div>
     <div class="scanlines"></div>
     <div class="vignette"></div>
-    <div class="glow-orb" style="background: radial-gradient(circle, rgba({accentRgb}, 0.15) 0%, transparent 70%)"></div>
+  </div>
+
+  <div class="art-overlay" aria-hidden="true">
+
+
+
+
+
   </div>
 
   <!-- ─── Top Bar ─── -->
@@ -228,20 +227,15 @@
 
   <!-- ─── Main Layout ─── -->
   <div class="main-layout">
-    <!-- Left: Bet Sidebar -->
-    <aside class="sidebar lg:block hidden">
+    <!-- Left: Floating bet controls -->
+    <aside class="bet-overlay lg:block hidden">
       <BetPanel
         bind:amount={localBet}
         bind:autoCashout={autoCashoutVal}
         disabled={!canBet && !game.betActive}
-        balance={game.balance}
         {actionState}
-        mode={game.selectedMode}
-        onModeChange={setGameMode}
         onCashout={cashout}
         payout={currentPayout}
-        {accentColor}
-        {accentRgb}
         onMainAction={handleMainAction}
       />
       
@@ -253,7 +247,6 @@
       {/if}
     </aside>
 
-    <!-- Center: Arena -->
     <main class="arena-container">
       <GameArena
         arenaStatus={isBroadcast ? 'over_ended' : (game.visualPhase === 'celebrate' ? 'result' : game.visualPhase === 'bowl' ? 'bowling' : game.visualPhase === 'hit' ? 'hitting' : game.visualPhase === 'wicket' ? 'wicket' : 'waiting')}
@@ -268,38 +261,57 @@
         onRestart={returnToIdle}
         onViewStats={dismissMatchOverlay}
       >
-        <CricketSimulation
-          phase={game.visualPhase}
-          multiplier={mult}
-          hitTrajectory={currentTrajectory}
-          bowlerType={currentBowler}
-          runs={typeof lastBallResult === 'number' ? lastBallResult : 0}
-          deliveryKey={game.deliveryKey}
-          phaseProgress={game.phaseProgress}
-          shotType={currentShotType}
-          shotLabel={commentaryText}
-        />
+        <CricketSimulation />
       </GameArena>
 
       <!-- Mobile Overlay -->
-      <div class="lg:hidden absolute bottom-4 left-4 right-4 z-30">
+      <div class="lg:hidden mobile-bet-overlay">
         <BetPanel
           bind:amount={localBet}
           bind:autoCashout={autoCashoutVal}
           disabled={!canBet && !game.betActive}
-          balance={game.balance}
           {actionState}
-          mode={game.selectedMode}
-          onModeChange={setGameMode}
           onCashout={cashout}
           payout={currentPayout}
-          {accentColor}
-          {accentRgb}
           onMainAction={handleMainAction}
         />
       </div>
     </main>
   </div>
+  <!-- ─── Stake-style Bottom Bar ─── -->
+  <footer class="bottom-bar">
+    <!-- Left: currency selector -->
+    <div class="bb-left">
+      <div class="currency-pill">
+        <span class="flag">🇺🇸</span>
+        <span class="curr-text">USD</span>
+        <span class="chevron">▾</span>
+      </div>
+    </div>
+
+    <!-- Center: Stake brand -->
+    <div class="bb-center">
+      <span class="stake-wordmark">Stake</span>
+    </div>
+
+    <!-- Right: mode toggles -->
+    <div class="bb-right">
+      <button
+        class="mode-pill mode-active"
+        onclick={() => setGameMode('OVER')}
+      >
+        <span class="mode-dot"></span>
+        Fun Play
+      </button>
+      <button
+        class="mode-pill mode-real"
+        onclick={() => setGameMode('POWERPLAY')}
+      >
+        <span class="mode-dot real-dot"></span>
+        Real Play
+      </button>
+    </div>
+  </footer>
 </div>
 
 <style>
@@ -307,7 +319,7 @@
     background: #02020e;
     color: #fff;
     margin: 0;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: "Trebuchet MS", Verdana, sans-serif;
   }
 
   .page {
@@ -316,7 +328,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: #010108;
+    background: #02020e;
     --accent: #6366f1;
     --accent-rgb: 99,102,241;
   }
@@ -327,39 +339,38 @@
     pointer-events: none;
     z-index: 0;
   }
+  .sky-gradient { display: none; }
+  .sky-glow { display: none; }
+  .sky-glow-left { display: none; }
+  .sky-glow-right { display: none; }
+  .sky-haze { display: none; }
   .scanlines {
     position: absolute;
     inset: 0;
     background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
     background-size: 100% 2px, 3px 100%;
-    opacity: 0.15;
+    opacity: 0.025;
   }
   .vignette {
     position: absolute;
     inset: 0;
-    background: radial-gradient(circle, transparent 40%, #000 100%);
-  }
-  .glow-orb {
-    position: absolute;
-    width: 60%;
-    height: 60%;
-    top: 20%;
-    left: 20%;
-    filter: blur(100px);
-    opacity: 0.4;
-    transition: background 0.5s ease;
+    background: radial-gradient(circle at 50% 50%, transparent 40%, rgba(0,0,0,0.35) 100%);
   }
 
   .topbar {
-    position: relative;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
     z-index: 20;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 1rem 2rem;
-    background: rgba(0,0,0,0.4);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    height: 72px;
+    padding: 0 34px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.36), transparent);
+    backdrop-filter: none;
+    border-bottom: 0;
   }
 
   .brand {
@@ -384,6 +395,15 @@
     100% { opacity: 1; }
   }
   .brand-logo { height: 1.6rem; }
+  .audio-btn {
+    width: 34px;
+    height: 34px;
+    border: 0;
+    background: rgba(0,0,0,0.12);
+    color: white;
+    border-radius: 50%;
+    cursor: pointer;
+  }
 
   .topbar-end {
     display: flex;
@@ -397,27 +417,59 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    color: #eef3ff;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.75);
   }
   .currency { color: rgba(255,255,255,0.4); font-size: 0.9rem; }
 
   .main-layout {
-    flex: 1;
+    position: absolute;
+    inset: 72px 0 44px;
     display: flex;
-    padding: 1rem;
-    gap: 1rem;
     min-height: 0;
     z-index: 10;
   }
 
-  .sidebar { width: 340px; flex-shrink: 0; }
+  .bet-overlay {
+    position: absolute;
+    left: 18px;
+    bottom: 18px;
+    z-index: 35;
+    width: 360px;
+    pointer-events: auto;
+    filter: drop-shadow(0 18px 40px rgba(0,0,0,0.38));
+  }
+
   .arena-container {
     flex: 1;
     position: relative;
-    background: #000;
-    border-radius: 20px;
+    width: 100%;
+    min-width: 0;
+    background: transparent;
+    border-radius: 0;
     overflow: hidden;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.8);
-    border: 1px solid rgba(255,255,255,0.03);
+    box-shadow: none;
+    border: 0;
+  }
+
+  .arena-container::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 30%;
+    background: linear-gradient(0deg, rgba(0,0,0,0.34), transparent);
+    pointer-events: none;
+    z-index: 20;
+  }
+
+  .mobile-bet-overlay {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    z-index: 35;
   }
 
   .win-toast {
@@ -435,5 +487,103 @@
   @keyframes slide-up {
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
+  }
+
+  /* ── Stake-style Bottom Bar ── */
+  .bottom-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    background: rgba(5, 7, 13, 0.96);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    backdrop-filter: blur(12px);
+    z-index: 50;
+  }
+
+  .bb-left, .bb-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .bb-center {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .stake-wordmark {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.75);
+    letter-spacing: 0.01em;
+    text-shadow: 0 0 20px rgba(255,255,255,0.3);
+  }
+
+  .currency-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+
+  .flag { font-size: 0.75rem; }
+
+  .curr-text {
+    font-size: 0.7rem;
+    font-weight: 700;
+    font-family: 'Orbitron', monospace;
+    color: rgba(255,255,255,0.7);
+    letter-spacing: 0.1em;
+  }
+
+  .chevron {
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.3);
+  }
+
+  .mode-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.4);
+    font-size: 0.7rem;
+    font-weight: 700;
+    font-family: 'Orbitron', monospace;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .mode-pill.mode-active {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.85);
+  }
+
+  .mode-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #00ff88;
+    box-shadow: 0 0 6px rgba(0,255,136,0.8);
+  }
+
+  .real-dot {
+    background: #ffd700;
+    box-shadow: 0 0 6px rgba(255,215,0,0.8);
   }
 </style>

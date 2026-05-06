@@ -356,7 +356,7 @@ export class StadiumActivitySystem {
     this.time += dt;
     this.updateFlashes(dt);
     this.updateFlags(dt);
-    this.updatePhoneLights(dt);
+    this.updateSyncWristbands(dt); // Updated naming for Phone Lights
     this.updateConfetti(dt);
     this.updateSpotlights(dt);
     this.updateSpecialFans(dt);
@@ -364,7 +364,8 @@ export class StadiumActivitySystem {
   }
 
   private updateFlashes(dt: number) {
-    const flashRate = 0.3 + this.excitement * 2.5;
+    // Flash rate increases exponentially with excitement
+    const flashRate = 0.4 + Math.pow(this.excitement, 1.8) * 8.0;
     for (let i = 0; i < FLASH_COUNT; i++) {
       const state = this.flashStates[i]!;
       const i3 = i * 3;
@@ -375,8 +376,8 @@ export class StadiumActivitySystem {
           state.cooldown = (FLASH_COOLDOWN_MIN + Math.random() * (FLASH_COOLDOWN_MAX - FLASH_COOLDOWN_MIN)) / flashRate;
           this.flashColors[i3] = 0; this.flashColors[i3 + 1] = 0; this.flashColors[i3 + 2] = 0;
         } else {
-          const intensity = 1.0 - (state.timer / FLASH_DURATION) * 0.3;
-          this.flashColors[i3] = intensity; this.flashColors[i3 + 1] = intensity; this.flashColors[i3 + 2] = intensity * 0.9;
+          const intensity = 1.0 - (state.timer / FLASH_DURATION) * 0.2;
+          this.flashColors[i3] = intensity; this.flashColors[i3 + 1] = intensity; this.flashColors[i3 + 2] = intensity;
         }
       } else if (state.timer >= state.cooldown) {
         state.active = true; state.timer = 0;
@@ -443,17 +444,34 @@ export class StadiumActivitySystem {
     }
   }
 
-  private updatePhoneLights(dt: number) {
+  private updateSyncWristbands(dt: number) {
     const colors = this.phoneLights.geometry.attributes.color!.array as Float32Array;
     const count = this.phoneLightTimers.length;
+
+    // Wristband color shifts with multiplier excitement
+    const wristColor = new THREE.Color();
+    if (this.excitement > 0.8) wristColor.set('#ff00ff');      // Neon Magenta
+    else if (this.excitement > 0.5) wristColor.set('#00ffff'); // Neon Cyan
+    else if (this.excitement > 0.2) wristColor.set('#00ff88'); // Neon Green
+    else wristColor.set('#ffffff');                           // Pure white
+
     for (let i = 0; i < count; i++) {
       this.phoneLightTimers[i] += dt;
       const i3 = i * 3;
       const t = this.phoneLightTimers[i]!;
-      const pattern = Math.sin(t * 1.3 + i * 7.1) * Math.sin(t * 0.5 + i * 3.7) + (this.excitement * 0.4);
-      const on = pattern > 0.3 + (1 - this.excitement) * 0.5;
-      if (on) {
-        colors[i3] = 0.7 + Math.random() * 0.2; colors[i3 + 1] = 0.75 + Math.random() * 0.2; colors[i3 + 2] = 0.9;
+      
+      // Pattern sync wave through the stadium
+      const angle = Math.atan2(this.phoneLightData[i3+2]!, this.phoneLightData[i3]!);
+      const wave = Math.sin(this.time * 2.0 + angle * 4.0);
+      
+      const pattern = Math.sin(t * 1.5 + i * 3.5) + (this.excitement * 0.8);
+      const isGlowing = pattern > (0.6 - this.excitement * 0.4);
+
+      if (isGlowing) {
+        const intensity = 0.5 + wave * 0.3 + this.excitement * 0.5;
+        colors[i3] = wristColor.r * intensity; 
+        colors[i3 + 1] = wristColor.g * intensity; 
+        colors[i3 + 2] = wristColor.b * intensity;
       } else {
         colors[i3] = 0; colors[i3 + 1] = 0; colors[i3 + 2] = 0;
       }

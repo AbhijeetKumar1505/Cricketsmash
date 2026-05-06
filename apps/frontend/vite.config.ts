@@ -7,9 +7,9 @@ import tailwindcss from '@tailwindcss/vite';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-  /** Monorepo `public/` (logo and static assets at repo root). */
-  publicDir: path.resolve(__dirname, '../../public'),
-  plugins: [svelte(), tailwindcss()],
+  /** Local `public/` (logo and static assets for the frontend). */
+  publicDir: path.resolve(__dirname, 'public'),
+  plugins: [tailwindcss(), svelte()],
   resolve: {
     /** Prefer browser-safe `@cricket-crash/fairness` entry (no `node:crypto`). */
     conditions: ['browser', 'development', 'import', 'module', 'default'],

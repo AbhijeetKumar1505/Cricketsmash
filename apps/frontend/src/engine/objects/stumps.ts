@@ -6,8 +6,8 @@ export class StumpsSide extends THREE.Group {
 
   constructor(battingEnd: boolean) {
     super();
-    const wood = new THREE.MeshStandardMaterial({ color: 0xf5e6c8, roughness: 0.65 });
-    const bailMat = new THREE.MeshStandardMaterial({ color: 0xe8d090, roughness: 0.5 });
+    const wood = new THREE.MeshPhongMaterial({ color: 0xffcc33 }); // Bright yellow-wood
+    const bailMat = new THREE.MeshPhongMaterial({ color: 0xff9900 }); // Orange bails
 
     this.stumps = [];
     for (let i = -1; i <= 1; i++) {

@@ -28,8 +28,10 @@ export class StadiumCameraRig {
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.camera = camera;
+    this.camera.fov = 70;
+    this.camera.updateProjectionMatrix();
     this.group = new THREE.Group();
-    this.basePosition = new THREE.Vector3(0, 9, 22);
+    this.basePosition = new THREE.Vector3(0, 4, 9);
     this.camera.position.copy(this.basePosition);
     this.camera.lookAt(this.lookAtTarget);
     this.group.add(this.camera);
@@ -58,7 +60,7 @@ export class StadiumCameraRig {
   setPerspective(perspective: CameraPerspective) {
     this.currentPerspective = perspective;
     if (perspective === 'broadcast') {
-      this.basePosition.set(0, 9, 22);
+      this.basePosition.set(0, 4, 9);
     } else if (perspective === 'bowler') {
       this.basePosition.set(0, 3.5, 12); // Directly behind bowler
     } else if (perspective === 'batsman') {

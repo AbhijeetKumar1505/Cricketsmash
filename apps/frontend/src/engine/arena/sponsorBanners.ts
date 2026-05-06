@@ -11,27 +11,16 @@ interface SponsorBrand {
 }
 
 const BRANDS: SponsorBrand[] = [
+  { name: 'POORSCHE',        tagline: 'There Is No Refund',                  bg: '#1a1a1a', fg: '#d4af37', accent: '#ffd700' },
+  { name: 'HEINECANT',       tagline: 'Probably the Worst Beer',             bg: '#004d00', fg: '#ff3333', accent: '#00cc44' },
+  { name: 'BADIDAS',         tagline: 'Impossible is Guaranteed',            bg: '#111111', fg: '#ffffff', accent: '#aaaaaa' },
   { name: 'BOKA COLA',       tagline: 'Taste the Crash',                     bg: '#8b0000', fg: '#ffffff', accent: '#ff3333' },
   { name: 'BURPSI',          tagline: 'The Next Gulp',                       bg: '#00308f', fg: '#ffffff', accent: '#3399ff' },
   { name: 'DEAD BULL',       tagline: 'Gives You Wings, Takes Them Back',    bg: '#1a1a3e', fg: '#ffd700', accent: '#4444ff' },
-  { name: 'LAZY\'S',         tagline: 'Bet You Can\'t Hit Just One',         bg: '#b8860b', fg: '#ffffff', accent: '#ffcc00' },
-  { name: 'DORIDON\'TS',     tagline: 'For the Bold (and Broke)',            bg: '#cc3300', fg: '#ffffff', accent: '#ff6622' },
-  { name: 'NIKO',            tagline: 'Don\'t Do It',                        bg: '#1a1a1a', fg: '#ffffff', accent: '#ff6600' },
-  { name: 'BADIDAS',         tagline: 'Impossible is Guaranteed',            bg: '#111111', fg: '#ffffff', accent: '#aaaaaa' },
   { name: 'LOOMA',           tagline: 'Forever Slower',                      bg: '#1a1a1a', fg: '#d4af37', accent: '#ffd700' },
-  { name: 'NO BALANCE',      tagline: 'Endorsed by Nobody',                  bg: '#c0392b', fg: '#ffffff', accent: '#3498db' },
-  { name: 'WEAKBOK',         tagline: 'I Am Not Fit',                        bg: '#1a3c6e', fg: '#ff4444', accent: '#ff6666' },
-  { name: 'FAILRARI',        tagline: 'Built for Speed, Stuck in Park',      bg: '#cc0000', fg: '#ffd700', accent: '#ff4444' },
-  { name: 'LUMBERING-HINI',  tagline: 'Slow and Expensive',                  bg: '#2a2a0a', fg: '#ffd700', accent: '#ccaa00' },
-  { name: 'POORSCHE',        tagline: 'There Is No Refund',                  bg: '#1a1a1a', fg: '#d4af37', accent: '#c0a030' },
-  { name: 'BRW',             tagline: 'Barely Running Well',                 bg: '#0a2a4a', fg: '#ffffff', accent: '#4488cc' },
+  { name: 'SAMESUNG',        tagline: 'Do What You Can\'t Afford',           bg: '#0d47a1', fg: '#ffffff', accent: '#2196f3' },
   { name: 'BLASTERCARD',     tagline: 'Priceless... and Empty',              bg: '#cc4400', fg: '#ffffff', accent: '#ff6622' },
   { name: 'VISA-LESS',       tagline: 'Everywhere You Aren\'t',              bg: '#1a237e', fg: '#ffd700', accent: '#3355cc' },
-  { name: 'DAPPLE',          tagline: 'Think Differently About Your Wallet', bg: '#2a2a2a', fg: '#c0c0c0', accent: '#888888' },
-  { name: 'SAMESUNG',        tagline: 'Do What You Can\'t Afford',           bg: '#0d47a1', fg: '#ffffff', accent: '#2196f3' },
-  { name: 'HEINECANT',       tagline: 'Probably the Worst Beer',             bg: '#004d00', fg: '#ff3333', accent: '#00cc44' },
-  { name: 'BUDDWEAKER',      tagline: 'King of Broken Dreams',               bg: '#8b0000', fg: '#ffd700', accent: '#cc3333' },
-  { name: 'MONSTER LAZY',    tagline: 'Unleash the Nap',                     bg: '#0a1a0a', fg: '#00ff44', accent: '#00cc33' },
 ];
 
 // ─── Contextual Event Messages ───────────────────────────────────────────────
@@ -44,41 +33,32 @@ interface ContextualAd {
 
 const EVENT_ADS: Record<string, ContextualAd[]> = {
   four: [
-    { brand: 'LAZY\'S',     message: 'Crispy Shot! 🔥',           color: '#ffcc00' },
-    { brand: 'NIKO',        message: 'They Did It Anyway!',       color: '#ff6600' },
-    { brand: 'FAILRARI',    message: 'Actually Moved!',           color: '#ff4444' },
-    { brand: 'BURPSI',      message: 'Gulp That Down!',           color: '#3399ff' },
+    { brand: 'HEINECANT', message: 'That\'s a Cold Shot! 🍻',      color: '#00cc44' },
+    { brand: 'BADIDAS',    message: 'Nothing is Impossible!',     color: '#aaaaaa' },
   ],
   six: [
-    { brand: 'DEAD BULL',   message: 'He Flew! 🚀',              color: '#ffd700' },
-    { brand: 'BOKA COLA',   message: 'TASTE THAT!',              color: '#ff3333' },
-    { brand: 'FAILRARI',    message: 'Top Speed Reached!',       color: '#ff4444' },
-    { brand: 'MONSTER LAZY', message: 'FULLY AWAKE! ⚡',         color: '#00ff44' },
+    { brand: 'POORSCHE',  message: 'TOP SPEED REACHED! 🏎️',       color: '#ffd700' },
+    { brand: 'DEAD BULL', message: 'HE FLEW! 🚀',                color: '#4444ff' },
   ],
   wicket: [
-    { brand: 'NIKO',        message: 'You Did It 😭',            color: '#ff6600' },
-    { brand: 'NO BALANCE',  message: 'Obviously.',               color: '#ff4444' },
-    { brand: 'POORSCHE',    message: 'No Refund Available',      color: '#c0a030' },
-    { brand: 'BLASTERCARD', message: 'That Was Priceless 💀',    color: '#ff6622' },
+    { brand: 'POORSCHE',  message: 'Refund Denied 💀',            color: '#ffd700' },
+    { brand: 'VISA-LESS', message: 'Declined Everywhere',         color: '#3355cc' },
   ],
   miss: [
-    { brand: 'NO BALANCE',  message: 'Obviously.',               color: '#cc4444' },
-    { brand: 'WEAKBOK',     message: 'Called It.',                color: '#ff6666' },
-    { brand: 'BADIDAS',     message: 'Impossible Indeed.',        color: '#aaaaaa' },
-    { brand: 'LOOMA',       message: 'Speed: 0 km/h',            color: '#ffd700' },
+    { brand: 'BADIDAS',   message: 'Impossible Indeed.',          color: '#aaaaaa' },
   ],
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const PANEL_COUNT = 16;
-const RIBBON_RADIUS = 42;
-const RIBBON_Y = 4.0;
-const RIBBON_H = 2.0;
-const TEX_W = 512;
-const TEX_H = 96;
-const ROTATION_INTERVAL = 4.0; // seconds between brand rotations
-const EVENT_FLASH_DURATION = 2.5;
+const PANEL_COUNT = 14; 
+const RIBBON_RADIUS = 43;
+const RIBBON_Y = 4.8;
+const RIBBON_H = 4.2; 
+const TEX_W = 1024; 
+const TEX_H = 256;
+const ROTATION_INTERVAL = 4.5;
+const EVENT_FLASH_DURATION = 3.0;
 
 // ─── Canvas Drawing Helpers ──────────────────────────────────────────────────
 
@@ -86,49 +66,53 @@ function drawBrandPanel(ctx: CanvasRenderingContext2D, brand: SponsorBrand, puls
   const W = TEX_W, H = TEX_H;
   ctx.clearRect(0, 0, W, H);
 
-  // Background gradient
+  // Deep dark premium background
+  ctx.fillStyle = '#080a12';
+  ctx.fillRect(0, 0, W, H);
+
+  // Background brand-glow gradient
   const bg = ctx.createLinearGradient(0, 0, W, 0);
-  bg.addColorStop(0, brand.bg + 'cc');
-  bg.addColorStop(0.3, brand.bg);
-  bg.addColorStop(0.7, brand.bg);
-  bg.addColorStop(1, brand.bg + 'cc');
+  bg.addColorStop(0,   brand.bg + '33');
+  bg.addColorStop(0.5, brand.bg + '55');
+  bg.addColorStop(1,   brand.bg + '33');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  // Neon border strips
-  const borderAlpha = Math.floor(80 + pulse * 120).toString(16).padStart(2, '0');
-  ctx.fillStyle = brand.accent + borderAlpha;
-  ctx.fillRect(0, 0, W, 3);
-  ctx.fillRect(0, H - 3, W, 3);
-  ctx.fillRect(0, 0, 4, H);
-  ctx.fillRect(W - 4, 0, 4, H);
-
-  // Brand name — large, glowing
-  ctx.save();
-  ctx.shadowBlur = 20 + pulse * 15;
+  // High-fidelity neon rails
+  const accentPulse = 0.8 + Math.sin(pulse * 4) * 0.2;
+  ctx.shadowBlur = 20 * accentPulse;
   ctx.shadowColor = brand.accent;
-  ctx.fillStyle = brand.fg;
-  ctx.font = 'bold 32px monospace';
+  ctx.fillStyle = brand.accent;
+  ctx.fillRect(0, 0, W, 8);
+  ctx.fillRect(0, H - 8, W, 8);
+
+  // Brand name — Massive esports-broadcast style
+  ctx.save();
+  ctx.shadowBlur = 15;
+  ctx.shadowColor = brand.accent;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 110px "Orbitron", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(brand.name, W / 2, H * 0.38);
+  ctx.letterSpacing = '8px';
+  ctx.fillText(brand.name, W / 2, H * 0.46);
   ctx.restore();
 
-  // Tagline — smaller, subtle
+  // Tagline — Sharp digital aesthetic
   ctx.save();
-  ctx.shadowBlur = 8;
-  ctx.shadowColor = brand.accent;
-  ctx.fillStyle = brand.accent + 'bb';
-  ctx.font = '13px monospace';
+  ctx.fillStyle = brand.accent;
+  ctx.font = '700 28px "Orbitron", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(brand.tagline, W / 2, H * 0.72);
+  ctx.letterSpacing = '12px';
+  ctx.globalAlpha = 0.8;
+  ctx.fillText(brand.tagline, W / 2, H * 0.84);
   ctx.restore();
 
-  // Subtle scan line effect
-  ctx.fillStyle = 'rgba(0,0,0,0.06)';
+  // Scanline overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
   for (let y = 0; y < H; y += 4) {
-    ctx.fillRect(0, y, W, 1);
+    ctx.fillRect(0, y, W, 2);
   }
 }
 

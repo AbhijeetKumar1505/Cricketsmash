@@ -3,7 +3,9 @@ import * as THREE from 'three';
 const MAX = 400;
 
 /**
- * Reused buffer for dust (bounce), sparks (hit), wicket debris — single draw call.
+ * Doodle-style particle field.
+ * Confetti (bright multi-color) for hits, tan dust for bounces.
+ * Uses NormalBlending for flat opaque colors (not additive glow).
  */
 export class ParticleField extends THREE.Points {
   private readonly velocities: Float32Array;
@@ -17,12 +19,12 @@ export class ParticleField extends THREE.Points {
     const col = new Float32Array(MAX * 3);
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     const mat = new THREE.PointsMaterial({
-      size: 0.14,
+      size: 0.22,           // bigger for doodle visibility
       vertexColors: true,
       transparent: true,
-      opacity: 0.85,
+      opacity: 0.9,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,   // flat colors, not additive glow
       sizeAttenuation: true,
     });
     super(geo, mat);
@@ -31,6 +33,16 @@ export class ParticleField extends THREE.Points {
     this.lives = new Float32Array(MAX);
     this.lives.fill(0);
   }
+
+  // Confetti colors for doodle celebration
+  private static CONFETTI = [
+    [1.0, 0.2, 0.3],   // red
+    [0.2, 0.7, 1.0],   // blue
+    [1.0, 0.85, 0.1],  // yellow
+    [0.3, 0.9, 0.4],   // green
+    [0.9, 0.3, 0.8],   // pink
+    [1.0, 0.5, 0.1],   // orange
+  ];
 
   spawnBurst(origin: THREE.Vector3, count: number, kind: 'dust' | 'spark' | 'debris') {
     const pos = this.geometry.attributes.position.array as Float32Array;
@@ -47,23 +59,21 @@ export class ParticleField extends THREE.Points {
         this.velocities[j3] = (Math.random() - 0.5) * 3.5;
         this.velocities[j3 + 1] = 1.2 + Math.random() * 2.2;
         this.velocities[j3 + 2] = (Math.random() - 0.5) * 2;
-        col[j3] = 0.82;
-        col[j3 + 1] = 0.74;
-        col[j3 + 2] = 0.55;
+        // Lighter tan dust
+        col[j3] = 0.88; col[j3 + 1] = 0.82; col[j3 + 2] = 0.65;
       } else if (kind === 'spark') {
+        // Confetti burst for 4s and 6s!
         this.velocities[j3] = (Math.random() - 0.5) * 8;
         this.velocities[j3 + 1] = 3 + Math.random() * 6;
         this.velocities[j3 + 2] = (Math.random() - 0.5) * 6;
-        col[j3] = 1;
-        col[j3 + 1] = 0.6 + Math.random() * 0.4;
-        col[j3 + 2] = 0.2;
+        const cc = ParticleField.CONFETTI[Math.floor(Math.random() * ParticleField.CONFETTI.length)];
+        col[j3] = cc[0]; col[j3 + 1] = cc[1]; col[j3 + 2] = cc[2];
       } else {
         this.velocities[j3] = (Math.random() - 0.5) * 5;
         this.velocities[j3 + 1] = 4 + Math.random() * 5;
         this.velocities[j3 + 2] = (Math.random() - 0.5) * 5;
-        col[j3] = 0.95;
-        col[j3 + 1] = 0.9;
-        col[j3 + 2] = 0.7;
+        // Stump debris — wood brown
+        col[j3] = 0.85; col[j3 + 1] = 0.72; col[j3 + 2] = 0.5;
       }
       this.lives[j] = 1;
     }

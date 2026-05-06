@@ -3,53 +3,57 @@
 
 @theme {
   /* ─── Color Tokens ─── */
-  --color-surface: #0b1326;
-  --color-surface-dim: #0b1326;
-  --color-surface-bright: #31394d;
-  --color-surface-variant: #2d3449;
-  --color-surface-container-lowest: #060e20;
-  --color-surface-container-low: #131b2e;
-  --color-surface-container: #171f33;
-  --color-surface-container-high: #222a3d;
-  --color-surface-container-highest: #2d3449;
+  --color-surface: #05070d;
+  --color-surface-dim: #05070d;
+  --color-surface-bright: #1a1f2e;
+  --color-surface-variant: #0d111a;
+  --color-surface-container-lowest: #020408;
+  --color-surface-container-low: #080c14;
+  --color-surface-container: #0b101a;
+  --color-surface-container-high: #121826;
+  --color-surface-container-highest: #1a1f2e;
 
-  --color-primary: #d0bcff;
-  --color-on-primary: #3c0091;
-  --color-primary-container: #a078ff;
-  --color-on-primary-container: #340080;
-  --color-primary-fixed: #e9ddff;
-  --color-primary-fixed-dim: #d0bcff;
+  /* Premium Broadcast Palette */
+  --color-pod-bg: #0d121f;
+  --color-pod-border: #1e2638;
+  --color-pod-gold: #c8a000;
+  --color-pod-gold-bright: #ffd700;
+  --color-pod-gold-dim: #8a6d00;
+  --color-pod-silver: #a0a8b8;
 
-  --color-secondary: #4edea3;
-  --color-on-secondary: #003824;
-  --color-secondary-container: #00a572;
-  --color-on-secondary-container: #00311f;
-  --color-secondary-fixed: #6ffbbe;
-  --color-secondary-fixed-dim: #4edea3;
+  /* Neon Palette */
+  --color-neon-green: #00ff88;
+  --color-neon-pink: #ff2bd6;
+  --color-gold: #f5c542;
+  --color-danger: #ff3b3b;
+  --color-electric-blue: #00d4ff;
 
-  --color-tertiary: #f9bd22;
-  --color-on-tertiary: #402d00;
-  --color-tertiary-container: #b88900;
-  --color-on-tertiary-container: #372700;
-  --color-tertiary-fixed: #ffdf9f;
-  --color-tertiary-fixed-dim: #f9bd22;
+  --color-primary: var(--color-neon-green);
+  --color-on-primary: #003824;
+  --color-primary-container: rgba(0, 255, 136, 0.2);
+  --color-on-primary-container: var(--color-neon-green);
 
-  --color-error: #ffb4ab;
-  --color-on-error: #690005;
-  --color-error-container: #93000a;
-  --color-on-error-container: #ffdad6;
+  --color-secondary: var(--color-neon-pink);
+  --color-on-secondary: #3d002e;
+  --color-secondary-container: rgba(255, 43, 214, 0.2);
+  --color-on-secondary-container: var(--color-neon-pink);
 
-  --color-outline: #958ea0;
-  --color-outline-variant: #494454;
-  --color-on-surface: #dae2fd;
-  --color-on-surface-variant: #cbc3d7;
-  --color-background: #0b1326;
-  --color-on-background: #dae2fd;
+  --color-tertiary: var(--color-gold);
+
+  --color-error: var(--color-danger);
+
+  --color-outline: #2d3449;
+  --color-outline-variant: #1a1f2e;
+  --color-on-surface: #ffffff;
+  --color-on-surface-variant: #a1a9bc;
+  --color-background: #05070d;
+  --color-on-background: #ffffff;
   --color-ruby-premium: #ff1e3c;
 
-  --font-headline: "Orbitron", monospace;
-  --font-body: "Rajdhani", sans-serif;
-  --font-label: "Rajdhani", sans-serif;
+  --font-headline: "Impact", "Haettenschweiler", "Arial Black", sans-serif;
+  --font-body: "Trebuchet MS", "Gill Sans", sans-serif;
+  --font-label: "Trebuchet MS", "Gill Sans", sans-serif;
+  --font-digital: "Impact", "Haettenschweiler", "Arial Black", sans-serif;
 
   --radius-xs: 0.125rem;
   --radius-sm: 0.25rem;
@@ -542,4 +546,130 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-outline-variant/60;
+}
+
+/* ─── The Control Pod 設計系統 ─── */
+.control-pod-shell {
+  @apply relative;
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+
+.control-pod {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 18%),
+    linear-gradient(160deg, rgba(230,205,130,0.16) 0%, transparent 34%),
+    linear-gradient(165deg, #29313b 0%, #10151b 50%, #05070a 100%);
+  border-radius: 1.3rem;
+  padding: 1.25rem 1.55rem 1.35rem;
+  border: 1px solid rgba(255,255,255,0.18);
+  transform: none;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 
+    0 18px 44px rgba(0,0,0,0.65),
+    inset 4px 4px 10px rgba(255,255,255,0.04),
+    inset -4px -4px 10px rgba(0,0,0,0.4),
+    0 0 0 1px rgba(255,215,0,0.22),
+    0 0 60px rgba(255, 215, 0, 0.12);
+  position: relative;
+  overflow: hidden;
+}
+
+.control-pod::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 40%, rgba(0,0,0,0.2) 100%);
+  pointer-events: none;
+}
+
+/* Metallic Lip */
+.pod-metal-lip {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 7px;
+  background: linear-gradient(90deg, 
+    transparent,
+    var(--color-pod-gold-dim), 
+    var(--color-pod-gold-bright), 
+    var(--color-pod-gold-dim),
+    transparent
+  );
+  opacity: 0.9;
+}
+
+/* Chip Style Buttons */
+.chip-3d {
+  @apply relative transition-all duration-200 active:scale-90;
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  border-width: 4px;
+  border-style: ridge;
+  box-shadow: 
+    0 6px 15px rgba(0,0,0,0.6),
+    inset 0 2px 4px rgba(255,255,255,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-family: var(--font-digital);
+  font-size: 0.9rem;
+  flex: 0 0 42px;
+}
+
+/* The Big Gold Action Button */
+.btn-gold-heavy {
+  @apply relative w-full rounded-2xl transition-all duration-300 active:scale-95 overflow-hidden;
+  background: linear-gradient(180deg, 
+    #fff8cd 0%,
+    #e6dbc7 18%,
+    #b69f74 48%,
+    #4c3a18 100%
+  );
+  border: 2px solid rgba(255,240,170,0.75);
+  box-shadow: 
+    0 12px 26px rgba(48, 34, 0, 0.45),
+    0 0 34px rgba(255, 238, 142, 0.38),
+    inset 0 2px 0 rgba(255,255,255,0.7),
+    inset 0 -8px 16px rgba(0,0,0,0.42);
+  color: #55340b !important;
+  font-size: 1.6rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.4);
+}
+
+.btn-gold-heavy::before {
+  content: '';
+  position: absolute;
+  inset: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(60, 38, 10, 0.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -1px 0 rgba(0,0,0,0.22);
+  pointer-events: none;
+}
+
+.btn-gold-heavy::after {
+  content: '';
+  position: absolute;
+  top: -40%;
+  left: -60%;
+  width: 70%;
+  height: 180%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent);
+  transform: rotate(18deg);
+  opacity: 0.0;
+  pointer-events: none;
+}
+
+.btn-gold-heavy:hover::after {
+  opacity: 1;
+  animation: bet-plaque-shine 0.7s ease-out forwards;
+}
+
+@keyframes bet-plaque-shine {
+  from { transform: translateX(0) rotate(18deg); }
+  to   { transform: translateX(260%) rotate(18deg); }
 }

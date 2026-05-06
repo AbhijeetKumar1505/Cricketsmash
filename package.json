@@ -6,7 +6,9 @@
     "node": ">=20"
   },
   "devDependencies": {
-    "@types/node": "^22.10.5"
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@types/node": "^22.10.5",
+    "svelte": "^5.16.0"
   },
   "scripts": {
     "bootstrap": "npx --yes pnpm@10.5.0 install && npm run build:packages",
