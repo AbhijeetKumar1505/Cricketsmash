@@ -5,20 +5,53 @@
  */
 import type { StakeGameClient, AuthResult, PlayResult, GameModeName } from './stakeClient.js';
 import type { Balance, AuthenticateConfig, JurisdictionFlags, Round } from 'stake-engine';
+import type { MathOutcomeKey, SkyObjectType } from '@cricket-crash/fairness';
+import {
+  STREAK_OVERRIDE_MULTIPLIERS,
+  isBoundaryOutcome,
+  pickWeighted,
+  profileForMode,
+} from './mathModel.js';
 
 const MOCK_CURRENCY = 'USD' as const;
 // Bet levels in micro-units (1_000_000 = $1.00)
 const MOCK_BET_LEVELS = [1_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000, 500_000_000];
 
-// Cricket crash payout distribution (weighted random)
-function randomPayoutMultiplier(): number {
-  const r = Math.random();
-  // ~18% wicket, ~28% dot/single, ~26% scoring shot, ~18% boundary, ~10% six
-  if (r < 0.18) return 0;                            // wicket — always exactly 0
-  if (r < 0.46) return 1.0 + Math.random() * 0.35;  // 1.0–1.35x (dot/single)
-  if (r < 0.72) return 1.35 + Math.random() * 0.9;  // 1.35–2.25x (2–3 runs)
-  if (r < 0.90) return 2.25 + Math.random() * 2.75; // 2.25–5.0x (four)
-  return 5.0 + Math.random() * 10.0;                 // 5.0–15.0x (six/bigshot)
+// Math-first payout resolver for dev mode:
+// weighted base outcome -> rare sky override -> rare streak override.
+function randomPayoutMultiplier(mode: GameModeName): number {
+  const profile = profileForMode(mode);
+  const base = pickWeighted(profile.outcomes, (o) => o.weight, Math.random);
+  let resolved = base.multiplier;
+
+  // Sky uses override multipliers (never additive).
+  if (Math.random() < profile.sky.chance) {
+    const sky = pickWeighted(
+      [
+        { key: 'jetpack', weight: profile.sky.weights.jetpack },
+        { key: 'smallPlane', weight: profile.sky.weights.smallPlane },
+        { key: 'bigPlane', weight: profile.sky.weights.bigPlane },
+      ] as const,
+      (o) => o.weight,
+      Math.random,
+    );
+    resolved =
+      sky.key === 'bigPlane'
+        ? profile.sky.multipliers.bigPlane
+        : profile.sky.multipliers.jetpack;
+  }
+
+  // Streak bonuses are ultra-rare volatility injectors.
+  // We approximate boundary streak rarity from p(boundary)^3 ~= 0.13%.
+  if (isBoundaryOutcome(base.key)) {
+    const streakRoll = Math.random();
+    if (streakRoll < 0.001331) resolved = Math.max(resolved, STREAK_OVERRIDE_MULTIPLIERS[3]);
+    else if (streakRoll < 0.001531) resolved = Math.max(resolved, STREAK_OVERRIDE_MULTIPLIERS[4]);
+    else if (streakRoll < 0.001631) resolved = Math.max(resolved, STREAK_OVERRIDE_MULTIPLIERS[5]);
+    else if (streakRoll < 0.001681) resolved = Math.max(resolved, STREAK_OVERRIDE_MULTIPLIERS[6]);
+  }
+
+  return Number(resolved.toFixed(2));
 }
 
 export function createDevMockClient(): StakeGameClient {
@@ -64,14 +97,14 @@ export function createDevMockClient(): StakeGameClient {
       };
     },
 
-    async play(amount: number, _mode?: GameModeName): Promise<PlayResult> {
+    async play(amount: number, mode: GameModeName = 'OVER'): Promise<PlayResult> {
       await new Promise((r) => setTimeout(r, 200));
 
       // Deduct bet
       balance = { ...balance, amount: balance.amount - amount };
       roundActive = true;
       lastBetAmount = amount;
-      lastPayoutMult = randomPayoutMultiplier();
+      lastPayoutMult = randomPayoutMultiplier(mode);
 
       const payout = Math.floor(amount * lastPayoutMult);
 
@@ -81,7 +114,7 @@ export function createDevMockClient(): StakeGameClient {
         payout,
         payoutMultiplier: lastPayoutMult,
         active: true,
-        mode: 'OVER',
+        mode,
         state: null,
       };
 
@@ -126,4 +159,64 @@ export function shouldUseMock(): boolean {
   const hasSession = params.has('sessionID') && params.get('sessionID') !== '';
   const hasRgsUrl = params.has('rgs_url') && params.get('rgs_url') !== '';
   return !hasSession || !hasRgsUrl;
+}
+
+const VALID_KEYS: ReadonlySet<MathOutcomeKey> = new Set([
+  'six',
+  'four',
+  'triple',
+  'double',
+  'single',
+  'dot',
+  'good_fielding',
+  'catch_out',
+]);
+
+const VALID_SKY: ReadonlySet<SkyObjectType> = new Set(['JETPACK', 'SMALL_PLANE', 'BIG_PLANE']);
+
+/**
+ * Dev forcing controls from URL params:
+ * - `force=six,four,dot,...`
+ * - `forceSky=JETPACK|SMALL_PLANE|BIG_PLANE`
+ * - `forceStreak=3|4|5|6`
+ */
+export function getForcedDecomposeOptions():
+  | {
+      forcedKeys?: MathOutcomeKey[];
+      forceSkyType?: SkyObjectType;
+      forceStreakLength?: 3 | 4 | 5 | 6;
+    }
+  | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const p = new URLSearchParams(window.location.search);
+  const force = p.get('force');
+  const forceSky = p.get('forceSky');
+  const forceStreak = p.get('forceStreak');
+
+  const out: {
+    forcedKeys?: MathOutcomeKey[];
+    forceSkyType?: SkyObjectType;
+    forceStreakLength?: 3 | 4 | 5 | 6;
+  } = {};
+
+  if (force) {
+    const keys = force
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean) as MathOutcomeKey[];
+    const valid = keys.filter((k) => VALID_KEYS.has(k));
+    if (valid.length > 0) out.forcedKeys = valid;
+  }
+
+  if (forceSky) {
+    const sky = forceSky.trim().toUpperCase() as SkyObjectType;
+    if (VALID_SKY.has(sky)) out.forceSkyType = sky;
+  }
+
+  if (forceStreak) {
+    const n = Number(forceStreak);
+    if (n === 3 || n === 4 || n === 5 || n === 6) out.forceStreakLength = n;
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined;
 }

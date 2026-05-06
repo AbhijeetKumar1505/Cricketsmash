@@ -1,5 +1,15 @@
 <script lang="ts">
-  import { game, placeBet, cashout, returnToIdle, dismissMatchOverlay, setBetAmount, setGameMode, type VisualPhase } from '../core/gameController.svelte.js';
+  import {
+    game,
+    placeBet,
+    cashout,
+    returnToIdle,
+    dismissMatchOverlay,
+    setBetAmount,
+    setGameMode,
+    getEffectiveTicketMultiplier,
+    type VisualPhase,
+  } from '../core/gameController.svelte.js';
   import CricketSimulation from '../lib/CricketSimulation.svelte';
   import GameArena from '../lib/GameArena.svelte';
   import {
@@ -28,7 +38,7 @@
   // Sync local → controller only; game.betAmount is never changed externally
   $effect(() => { setBetAmount(localBet); });
 
-  let mult = $derived(game.displayMultiplier);
+  let mult = $derived(game.displayMultiplier * game.bonusProfitMultProduct);
   let soundOn = $state(true);
   let lastCashout = $state<string | null>(null);
   let pageEl = $state<HTMLElement | undefined>(undefined);
@@ -68,14 +78,15 @@
   // ─── Scorecard: snapshot at broadcast phase for post-round summary ───
   const scorecardData = $derived.by(() => {
     if (game.phase !== 'broadcast') return null;
-    const mult_val = game.payoutMultiplier;
-    const bet = game.betAmount;
+    const mult_val = game.lastSettledMultiplier > 0 ? game.lastSettledMultiplier : getEffectiveTicketMultiplier();
+    const bet = game.lastSettledBetAmount > 0 ? game.lastSettledBetAmount : game.betAmount;
+    const payout = game.lastSettledPayout > 0 ? game.lastSettledPayout : bet * mult_val;
     const wasWicket = game.overSummary.some(s => s?.kind === 'wicket');
     return {
       history:   game.overSummary,
       multiplier: mult_val,
       betAmount:  bet,
-      profit:     mult_val > 0 ? bet * mult_val - bet : -bet,
+      profit:     mult_val > 0 ? payout - bet : -bet,
       wasWicket,
       streak,
     };
@@ -129,8 +140,7 @@
 
   const currentPayout = $derived.by(() => {
     if (!game.betActive) return 0;
-    const profitMult = game.displayMultiplier / Math.max(0.01, game.entryMultiplier);
-    return game.betAmount * profitMult;
+    return game.betAmount * getEffectiveTicketMultiplier();
   });
 
   // ─── React to visual phase changes for audio/events ───
@@ -204,58 +214,19 @@
 
   </div>
 
-  <!-- ─── Top Bar ─── -->
-  <header class="topbar">
-    <div class="brand">
-      <div class="live-badge"><span>LIVE</span></div>
-      <img class="brand-logo" src="/logo.jpeg" alt="Cricket Crash" />
-    </div>
-    
-    <div class="topbar-end">
-      <div class="bal-pill">
-        <span class="currency">{game.currency === 'USD' ? '$' : game.currency}</span>
-        {game.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-      </div>
-      <button
-        class="audio-btn"
-        onclick={() => { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); }}
-      >
-        {soundOn ? '🔊' : '🔇'}
-      </button>
-    </div>
-  </header>
-
-  <!-- ─── Main Layout ─── -->
+  <!-- ─── Main Layout (full bleed to top — no top HUD strip) ─── -->
   <div class="main-layout">
-    <!-- Left: Floating bet controls -->
-    <aside class="bet-overlay lg:block hidden">
-      <BetPanel
-        bind:amount={localBet}
-        bind:autoCashout={autoCashoutVal}
-        disabled={!canBet && !game.betActive}
-        {actionState}
-        onCashout={cashout}
-        payout={currentPayout}
-        onMainAction={handleMainAction}
-      />
-      
-      {#if lastCashout}
-        <div class="win-toast" style="--accent: {accentColor}">
-          <div class="win-ring"></div>
-          <span>WIN +${lastCashout}</span>
-        </div>
-      {/if}
-    </aside>
-
     <main class="arena-container">
       <GameArena
         arenaStatus={isBroadcast ? 'over_ended' : (game.visualPhase === 'celebrate' ? 'result' : game.visualPhase === 'bowl' ? 'bowling' : game.visualPhase === 'hit' ? 'hitting' : game.visualPhase === 'wicket' ? 'wicket' : 'waiting')}
         overHistory={game.overSummary}
         currentBallIdx={game.currentBallIdx}
-        accumulatedMult={game.displayMultiplier}
+        accumulatedMult={game.displayMultiplier * game.bonusProfitMultProduct}
         {commentaryText}
         {commentaryKey}
         {streak}
+        rewardToast={game.pendingRewardToast}
+        skyHitToast={game.skyHitToast}
         {scorecardData}
         lossAmount={game.betAmount}
         onRestart={returnToIdle}
@@ -264,8 +235,14 @@
         <CricketSimulation />
       </GameArena>
 
-      <!-- Mobile Overlay -->
-      <div class="lg:hidden mobile-bet-overlay">
+      <!-- Bottom-center dock (all breakpoints — keeps outfield / pitch visible) -->
+      <div class="bet-dock-wrap">
+        {#if lastCashout}
+          <div class="win-toast-float" style="--accent: {accentColor}">
+            <div class="win-ring"></div>
+            <span>WIN +${lastCashout}</span>
+          </div>
+        {/if}
         <BetPanel
           bind:amount={localBet}
           bind:autoCashout={autoCashoutVal}
@@ -280,13 +257,25 @@
   </div>
   <!-- ─── Stake-style Bottom Bar ─── -->
   <footer class="bottom-bar">
-    <!-- Left: currency selector -->
+    <!-- Left: currency + balance + audio (moved off removed top strip) -->
     <div class="bb-left">
       <div class="currency-pill">
         <span class="flag">🇺🇸</span>
         <span class="curr-text">USD</span>
         <span class="chevron">▾</span>
       </div>
+      <div class="bb-balance">
+        <span class="bb-curr">{game.currency === 'USD' ? '$' : game.currency}</span>
+        <span>{game.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+      </div>
+      <button
+        type="button"
+        class="bb-audio"
+        aria-label={soundOn ? 'Mute audio' : 'Unmute audio'}
+        onclick={() => { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); }}
+      >
+        {soundOn ? '🔊' : '🔇'}
+      </button>
     </div>
 
     <!-- Center: Stake brand -->
@@ -298,6 +287,7 @@
     <div class="bb-right">
       <button
         class="mode-pill mode-active"
+        aria-label="Switch to Fun Play mode"
         onclick={() => setGameMode('OVER')}
       >
         <span class="mode-dot"></span>
@@ -305,6 +295,7 @@
       </button>
       <button
         class="mode-pill mode-real"
+        aria-label="Switch to Real Play mode"
         onclick={() => setGameMode('POWERPLAY')}
       >
         <span class="mode-dot real-dot"></span>
@@ -357,87 +348,32 @@
     background: radial-gradient(circle at 50% 50%, transparent 40%, rgba(0,0,0,0.35) 100%);
   }
 
-  .topbar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 20;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    height: 72px;
-    padding: 0 34px;
-    background: linear-gradient(180deg, rgba(0,0,0,0.36), transparent);
-    backdrop-filter: none;
-    border-bottom: 0;
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-  .live-badge {
-    background: #ff1e3c;
-    color: #fff;
-    font-size: 0.7rem;
-    font-weight: 900;
-    padding: 0.2rem 0.5rem;
-    border-radius: 4px;
-    letter-spacing: 0.1em;
-    box-shadow: 0 0 10px rgba(255,30,60,0.4);
-    animation: pulse 2s infinite;
-  }
-  @keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.6; }
-    100% { opacity: 1; }
-  }
-  .brand-logo { height: 1.6rem; }
-  .audio-btn {
-    width: 34px;
-    height: 34px;
-    border: 0;
-    background: rgba(0,0,0,0.12);
-    color: white;
-    border-radius: 50%;
-    cursor: pointer;
-  }
-
-  .topbar-end {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-  }
-  .bal-pill {
-    font-size: 1.25rem;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: #eef3ff;
-    text-shadow: 0 2px 12px rgba(0,0,0,0.75);
-  }
-  .currency { color: rgba(255,255,255,0.4); font-size: 0.9rem; }
-
   .main-layout {
     position: absolute;
-    inset: 72px 0 44px;
+    inset: 0 0 52px;
     display: flex;
     min-height: 0;
     z-index: 10;
   }
 
-  .bet-overlay {
+  /* Bottom-centre bet HUD — anchored above footer, does not occlude sidewards turf */
+  .bet-dock-wrap {
     position: absolute;
-    left: 18px;
-    bottom: 18px;
+    left: 50%;
+    bottom: 8px;
+    transform: translateX(-50%);
     z-index: 35;
-    width: 360px;
+    width: min(600px, calc(100% - 24px));
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    filter: drop-shadow(0 16px 36px rgba(0, 0, 0, 0.5));
+  }
+
+  .bet-dock-wrap > :global(.bet-dock) {
     pointer-events: auto;
-    filter: drop-shadow(0 18px 40px rgba(0,0,0,0.38));
   }
 
   .arena-container {
@@ -464,25 +400,31 @@
     z-index: 20;
   }
 
-  .mobile-bet-overlay {
-    position: absolute;
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    z-index: 35;
-  }
-
-  .win-toast {
-    margin-top: 1rem;
-    background: rgba(var(--accent-rgb), 0.1);
-    border: 1px solid var(--accent);
-    color: var(--accent);
-    padding: 1rem;
-    border-radius: 12px;
+  .win-toast-float {
+    position: relative;
+    pointer-events: none;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid color-mix(in srgb, var(--accent), transparent 55%);
+    color: color-mix(in srgb, var(--accent), #fff 15%);
+    padding: 10px 16px;
+    border-radius: 14px;
     text-align: center;
     font-weight: 900;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     animation: slide-up 0.4s ease-out;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 0 28px color-mix(in srgb, var(--accent), transparent 72%);
+  }
+
+  .win-ring {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+    box-shadow: inset 0 0 22px color-mix(in srgb, var(--accent), transparent 40%);
+    opacity: 0.85;
   }
   @keyframes slide-up {
     from { transform: translateY(20px); opacity: 0; }
@@ -493,11 +435,12 @@
   .bottom-bar {
     position: fixed;
     bottom: 0; left: 0; right: 0;
-    height: 44px;
+    height: 52px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
+    gap: 12px;
+    padding: 0 16px;
     background: rgba(5, 7, 13, 0.96);
     border-top: 1px solid rgba(255,255,255,0.06);
     backdrop-filter: blur(12px);
@@ -508,12 +451,50 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+  }
+
+  .bb-balance {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    padding: 6px 10px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    font-family: 'Orbitron', monospace;
+    color: rgba(255,255,255,0.92);
+    letter-spacing: -0.02em;
+  }
+  .bb-curr {
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.45);
+  }
+
+  .bb-audio {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.06);
+    color: #fff;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1rem;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    appearance: none;
   }
 
   .bb-center {
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
+    pointer-events: none;
   }
 
   .stake-wordmark {
@@ -533,8 +514,9 @@
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: 6px 9px;
     cursor: pointer;
+    min-height: 36px;
   }
 
   .flag { font-size: 0.75rem; }
@@ -556,12 +538,12 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    padding: 5px 12px;
+    padding: 8px 12px;
     border-radius: 20px;
     border: 1px solid rgba(255,255,255,0.1);
     background: rgba(255,255,255,0.04);
     color: rgba(255,255,255,0.4);
-    font-size: 0.7rem;
+    font-size: 0.72rem;
     font-weight: 700;
     font-family: 'Orbitron', monospace;
     letter-spacing: 0.05em;
@@ -585,5 +567,47 @@
   .real-dot {
     background: #ffd700;
     box-shadow: 0 0 6px rgba(255,215,0,0.8);
+  }
+
+  .bb-audio:focus-visible,
+  .mode-pill:focus-visible,
+  .currency-pill:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent, #6366f1) 70%, white);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 980px) {
+    .stake-wordmark {
+      display: none;
+    }
+    .bottom-bar {
+      justify-content: space-between;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .main-layout {
+      inset: 0 0 96px;
+    }
+    .bottom-bar {
+      height: auto;
+      min-height: 52px;
+      padding: 6px 10px;
+      display: grid;
+      grid-template-columns: 1fr;
+      row-gap: 6px;
+    }
+    .bb-left, .bb-right {
+      width: 100%;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .bb-center {
+      display: none;
+    }
+    .mode-pill {
+      flex: 1 1 calc(50% - 4px);
+      justify-content: center;
+    }
   }
 </style>

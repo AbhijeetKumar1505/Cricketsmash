@@ -12,6 +12,12 @@
  *       → system mutations
  *         → EventBus.emit()
  *           → EngineBridge callbacks → Svelte reactive state
+ *
+ * Physics upgrade (new deterministic modules):
+ *   Post-hit physics is now driven by BallController (fixed 1/60 s steps,
+ *   semi-implicit Euler) instead of the legacy variable-dt BallSystem path.
+ *   Hit velocity is computed by HitEngine (result-driven kinematics).
+ *   BowlerFSM + BatsmanFSM run alongside AnimationSystem for richer state data.
  */
 
 import { EventBus }           from './events/EventBus.js';
@@ -23,14 +29,43 @@ import { AnimationSystem,
 import { FeedbackSystem,
          makeFeedbackState }  from './systems/FeedbackSystem.js';
 import { RoundSystem }        from './systems/RoundSystem.js';
-import { TIMING, WORLD }      from './constants.js';
+import { TIMING, BALL }       from './constants.js';
+import { OutcomeSystem }      from './rng/OutcomeSystem.js';
 import type { BallData }      from './systems/BallSystem.js';
 import type { CharacterAnimState } from './systems/AnimationSystem.js';
 import type { FeedbackState } from './systems/FeedbackSystem.js';
 import type { RoundData }     from './systems/RoundSystem.js';
-import type { DeliveryOutcome } from './rng/OutcomeSystem.js';
+import type { DeliveryOutcome, ShotResult } from './rng/OutcomeSystem.js';
+import { GameState } from './state/StateMachine.js';
+
+// ── New deterministic physics modules ─────────────────────────────────────────
+import { BallController }  from './physics/ballController.js';
+import { HitEngine }       from './physics/hitEngine.js';
+import { BowlerFSM }       from './physics/animationFSM.js';
+import { BatsmanFSM }      from './physics/animationFSM.js';
+import { Vec3, mulberry32, makeSeed } from './physics/physics.js';
+import {
+  BATSMAN_CREASE_Z,
+  BONUS_SKILL_ZONES,
+  BOWLER_RELEASE_Z,
+  BOWLER_RUN_START_Z,
+  FIELDER_SLOTS,
+} from './worldLayout.js';
+import type { BonusType } from './events/EventBus.js';
+import type { BonusRoamContext, BonusSnapshot } from './bonus/types.js';
+import { BonusSystem } from './systems/BonusSystem.js';
+import { SkyObjectSystem } from './systems/SkyObjectSystem.js';
+import type { SkyObjectSnapshot } from './sky/types.js';
 
 // ── Public snapshot (read-only view consumed by Renderer each frame) ──────────
+
+export type FielderPhase = 'idle' | 'chase' | 'gather';
+
+export interface FielderSnapState {
+  readonly x:     number;
+  readonly z:     number;
+  readonly phase: FielderPhase;
+}
 
 export interface EngineSnapshot {
   readonly phase:    string;
@@ -39,6 +74,16 @@ export interface EngineSnapshot {
   readonly bowler:   Readonly<CharacterAnimState>;
   readonly feedback: Readonly<FeedbackState>;
   readonly round:    Readonly<RoundData>;
+  readonly fielders: ReadonlyArray<FielderSnapState>;
+  readonly bonusObjects: ReadonlyArray<BonusSnapshot>;
+  readonly activeBonusHit: Readonly<{
+    sourceId: string;
+    extraBalls: number;
+    type: BonusType;
+    worldPos: { x: number; y: number; z: number };
+  } | null>;
+  /** Sky Object Lite (standard mode); null when inactive. */
+  readonly skyObject: SkyObjectSnapshot | null;
 }
 
 // ── Input union ───────────────────────────────────────────────────────────────
@@ -46,58 +91,97 @@ export interface EngineSnapshot {
 export type EngineInput =
   | { type: 'bowl';  outcome: DeliveryOutcome }
   | { type: 'swing' }
-  | { type: 'reset' };   // called by bridge after result phase ends
+  | { type: 'reset' };
 
 // ── GameEngine ────────────────────────────────────────────────────────────────
 
 export class GameEngine {
-  // Public: UI layer subscribes to events here
   readonly events: EventBus;
 
-  // ── Architecture ─────────────────────────────────────────────────────────
+  // ── Legacy systems (unchanged) ────────────────────────────────────────────
   private readonly sm:        StateMachine;
   private readonly ballSys:   BallSystem;
   private readonly hitSys:    HitSystem;
   private readonly animSys:   AnimationSystem;
   private readonly feedSys:   FeedbackSystem;
   private readonly roundSys:  RoundSystem;
+  private readonly outcomeSys: OutcomeSystem;
 
-  // ── State (engine owns, systems mutate via reference) ─────────────────────
+  // ── New deterministic physics ─────────────────────────────────────────────
+  private readonly hitEng:    HitEngine;
+  private readonly bowlerFSM: BowlerFSM;
+  private readonly batsmanFSM: BatsmanFSM;
+  /** Per-delivery ball physics controller (replaces ballSys.updatePostHit). */
+  private readonly physicsCtrl: BallController;
+  /** Seeded RNG for the current delivery. Re-created on each bowl. */
+  private _rng: () => number = mulberry32(0);
+  /** Match-level seed (same across all deliveries in a session). */
+  private readonly _matchSeed: number;
+  /** Rolling delivery counter for per-ball seeding. */
+  private _ballId = 0;
+
+  // ── State ─────────────────────────────────────────────────────────────────
   private readonly ball:     BallData     = {
     x: 0, y: 1.8, z: -9, vx: 0, vy: 0, vz: 0,
     rx: 0, ry: 0, rz: 0, elapsed: 0, params: null, active: false,
+    predictedLanding: null, bounce: 0.45, groundFriction: 0.8,
   };
   private readonly batsman:  CharacterAnimState = makeCharacterAnim();
   private readonly bowler:   CharacterAnimState = makeCharacterAnim();
   private readonly feedback: FeedbackState      = makeFeedbackState();
   private          round:    RoundData;
+  private          currentShot: ShotResult | null = null;
 
-  // ── Internal flags ────────────────────────────────────────────────────────
-  /** True once triggerSwing is received, until end of round. */
-  private swingPending    = false;
-  /** Signed: +1 off-side, -1 leg-side. Randomised per delivery. */
-  private lateralSign     = 1;
-  /** True when ball is in post_hit for a wicket (rolling toward stumps). */
-  private wicketPostHit   = false;
+  // ── Fielder simulation state ──────────────────────────────────────────────
+  private readonly _fielderStates: Array<{ x: number; z: number; phase: FielderPhase }>;
+  private _activeFielder = -1;
+  private _fielderTarget: { x: number; z: number } | null = null;
+  private readonly _bonusSys = new BonusSystem(BONUS_SKILL_ZONES);
+  private readonly _skySys = new SkyObjectSystem();
+  /** Current delivery uses sky bonus trajectory (no stadium bonus collisions). */
+  private _skyActive = false;
+  private _skyImpactEmitted = false;
+  private _activeBonusHit: {
+    sourceId: string;
+    extraBalls: number;
+    type: BonusType;
+    worldPos: { x: number; y: number; z: number };
+    ttl: number;
+  } | null = null;
 
-  constructor() {
-    this.events   = new EventBus();
-    this.sm       = new StateMachine(this.events);
-    this.ballSys  = new BallSystem();
-    this.hitSys   = new HitSystem();
-    this.animSys  = new AnimationSystem();
-    this.feedSys  = new FeedbackSystem();
-    this.roundSys = new RoundSystem();
-    this.round    = this.roundSys.makeData();
+  // ── Flags ─────────────────────────────────────────────────────────────────
+  private swingPending   = false;
+  private hitResolved    = false;
+  private resultEmitted  = false;
+  private _bonusEligible = false;
+
+  constructor(matchSeed?: number) {
+    this._matchSeed  = matchSeed ?? (Date.now() & 0xffffffff);
+    this.events      = new EventBus();
+    this.sm          = new StateMachine(this.events);
+    this.ballSys     = new BallSystem();
+    this.hitSys      = new HitSystem();
+    this.animSys     = new AnimationSystem();
+    this.feedSys     = new FeedbackSystem();
+    this.roundSys    = new RoundSystem();
+    this.outcomeSys  = new OutcomeSystem();
+    this.round       = this.roundSys.makeData();
+
+    // New physics modules
+    this.hitEng      = new HitEngine();
+    this.bowlerFSM   = new BowlerFSM();
+    this.batsmanFSM  = new BatsmanFSM();
+    this.physicsCtrl = new BallController(this._rng);
+
+    // Wire FSM callbacks (no circular state mutation — only flag reads)
+    this.bowlerFSM.onRelease = () => { /* ball spawned by BallSystem on BALL_RELEASE state */ };
+    this.batsmanFSM.onContact = () => { /* hit is resolved in tickHit() */ };
+
+    this._fielderStates = FIELDER_SLOTS.map(s => ({ x: s.x, z: s.z, phase: 'idle' as FielderPhase }));
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  /**
-   * Dispatch an input action from the bridge.
-   * The engine validates it against the current state machine phase;
-   * invalid actions are silently dropped.
-   */
   handleInput(input: EngineInput): void {
     switch (input.type) {
       case 'bowl':  this.startBowl(input.outcome); break;
@@ -106,29 +190,44 @@ export class GameEngine {
     }
   }
 
-  /**
-   * Main update.  Called by GameLoop every frame.
-   * Advances simulation by dt (already clamped by GameLoop).
-   */
   update(dt: number): void {
     this.sm.tick(dt);
 
-    // Hit-pause freezes ball/physics but not animations or particles.
     const physicsDt = this.feedSys.isPaused(this.feedback) ? 0 : dt;
 
     this.feedSys.update(this.feedback, dt);
     this.animSys.update(this.batsman, dt);
     this.animSys.update(this.bowler,  dt);
 
-    const phase = this.sm.phase;
+    // Advance new FSMs in parallel with existing animation system
+    this.bowlerFSM.update(dt);
+    this.batsmanFSM.update(dt);
 
-    if (phase === 'bowling')    this.tickBowling(physicsDt);
-    else if (phase === 'hit_window') this.tickHitWindow(dt);
-    else if (phase === 'post_hit')   this.tickPostHit(physicsDt);
-    else if (phase === 'result')     this.tickResult();
+    const phase = this.sm.phase;
+    if (phase === GameState.BOWLER_RUNUP)   this.tickBowlerRunup();
+    else if (phase === GameState.BALL_RELEASE) this.tickBallRelease();
+    else if (phase === GameState.BALL_TRAVEL)  this.tickBallTravel(physicsDt);
+    else if (phase === GameState.HIT)          this.tickHit();
+    else if (phase === GameState.BALL_RESULT)  this.tickBallResult(physicsDt);
+    else if (phase === GameState.RESET)        this.tickReset();
+
+    if (this._activeBonusHit) {
+      this._activeBonusHit.ttl -= dt;
+      if (this._activeBonusHit.ttl <= 0) this._activeBonusHit = null;
+    }
+    const bowlerT = Math.min(1, Math.max(0, this.bowler.runT));
+    const roam: BonusRoamContext = {
+      fielders: this._fielderStates.map((f) => ({ x: f.x, z: f.z })),
+      bowlerX:           0,
+      bowlerZ:           BOWLER_RUN_START_Z
+        + (BOWLER_RELEASE_Z - BOWLER_RUN_START_Z) * bowlerT,
+      batsmanX:        0.08,
+      batsmanZ:        BATSMAN_CREASE_Z - 0.68,
+    };
+    this._bonusSys.update(dt, roam, this._rng);
+    this._skySys.update(dt);
   }
 
-  /** Immutable snapshot for the Renderer. Cheap — no copies. */
   getSnapshot(): EngineSnapshot {
     return {
       phase:    this.sm.phase,
@@ -137,160 +236,357 @@ export class GameEngine {
       bowler:   this.bowler,
       feedback: this.feedback,
       round:    this.round,
+      fielders: this._fielderStates,
+      bonusObjects: this._bonusSys.getActive(),
+      activeBonusHit: this._activeBonusHit
+        ? {
+            sourceId: this._activeBonusHit.sourceId,
+            extraBalls: this._activeBonusHit.extraBalls,
+            type: this._activeBonusHit.type,
+            worldPos: this._activeBonusHit.worldPos,
+          }
+        : null,
+      skyObject: this._skySys.snapshot,
     };
   }
 
   // ── Private: phase logic ───────────────────────────────────────────────────
 
   private startBowl(outcome: DeliveryOutcome): void {
-    if (!this.sm.transition('bowling')) return;
+    if (!this.sm.transition(GameState.BETTING)) return;
+    if (!this.sm.transition(GameState.BOWLER_RUNUP)) return;
 
     this.swingPending   = false;
-    this.lateralSign    = Math.random() > 0.5 ? 1 : -1;
+    this.hitResolved    = false;
+    this.resultEmitted  = false;
+    this._bonusEligible = false;
+    this._skyImpactEmitted = false;
+    this.currentShot    = this.outcomeSys.toShotResult(outcome);
 
+    // ── New: seed deterministic RNG for this delivery ──────────────────────
+    this._ballId += 1;
+    this._rng = mulberry32(makeSeed(this._ballId, this._matchSeed));
+    this.physicsCtrl.setRNG(this._rng);
+
+    this._skyActive = !!outcome.skyObject;
+    if (!outcome.skyObject) {
+      this._skySys.dispose();
+    }
+
+    // Reset physics controller (idle at release position)
+    this.physicsCtrl.reset(new Vec3(0, 1.8, -9));
+
+    // Reset new FSMs + fielders
+    this.batsmanFSM.reset();
+    this.bowlerFSM.start();
+    this._resetFielders();
+    this._activeBonusHit = null;
+
+    // Legacy ball + round systems
     this.ballSys.bowl(this.ball, {
       bowlerType: outcome.bowlerType,
       hitTime:    outcome.hitTime,
       outcome:    outcome.result,
+      bucket:     outcome.bucket,
     });
-
     this.roundSys.startRound(this.round, outcome.targetMultiplier);
+    const spawned = this._bonusSys.spawnBonus({ ballNumber: this.round.ballNumber, canSpawn: true }, this._rng);
+    if (spawned) {
+      this.events.emit('bonusSpawned', {
+        sourceId: spawned.id,
+        type: spawned.def.type,
+        zone: spawned.zone.zone,
+        rarityTier: spawned.def.rarityTier,
+        worldPos: { x: spawned.zone.x, y: spawned.zone.y, z: spawned.zone.z },
+      });
+    }
     this.animSys.reset(this.batsman);
     this.animSys.reset(this.bowler);
     this.animSys.startBowl(this.bowler);
+
+    // Batsman enters pre-swing stance
+    this.batsmanFSM.startBacklift();
 
     this.events.emit('bowlStart', {
       bowlerType: outcome.bowlerType,
       hitTime:    outcome.hitTime,
     });
+
+    if (outcome.skyObject) {
+      this._skySys.spawn(outcome.skyObject.type, this._ballId, this._rng);
+      const p = this._skySys.getTarget();
+      if (p) {
+        this.events.emit('skyObjectSpawned', {
+          type: outcome.skyObject.type,
+          worldPos: { x: p.x, y: p.y, z: p.z },
+        });
+      }
+    }
   }
 
   private registerSwing(): void {
-    if (this.swingPending) return;  // only one swing per delivery
-
-    if (this.sm.is('bowling') || this.sm.is('hit_window')) {
+    if (this.swingPending) return;
+    if (this.sm.is(GameState.BALL_TRAVEL) || this.sm.is(GameState.HIT)) {
       this.swingPending = true;
-
-      // If we're already in hit_window, resolve immediately.
-      // If still in bowling, the resolution fires when hit_window opens.
-      if (this.sm.is('hit_window')) {
-        this.resolveSwing();
-      }
+      // Trigger batsman FSM swing (animation-only; physics resolved in tickHit)
+      this.batsmanFSM.triggerSwing();
     }
   }
 
   private resolveSwing(): void {
     const params  = this.ball.params!;
-    const quality = this.hitSys.evaluate(this.ball.elapsed, params.hitTime);
+    const legacy  = this.hitSys.evaluate(this.ball.elapsed, params.hitTime);
+    const timingError = this.ball.elapsed - params.hitTime;
+
+    // ── New: result-driven hit velocity via HitEngine ──────────────────────
+    const hitOut = this.hitEng.resolve({
+      timingError,
+      shotPower:    this.currentShot?.power ?? 0.5,
+      targetBucket: params.bucket,
+      rng:          this._rng,
+    });
+
+    if (this._skyActive && this._skySys.snapshot) {
+      hitOut.velocity = this._skySys.computeImpulse(
+        new Vec3(this.ball.x, this.ball.y, this.ball.z),
+        this._skySys.flightTime,
+      );
+    }
+
+    const quality        = hitOut.quality !== 'miss' ? legacy : 'miss';
+    const resolvedBucket = quality === 'miss' ? 'wicket' : params.bucket;
+    this._bonusEligible = resolvedBucket !== 'wicket' && !this._skyActive;
 
     // Animate batsman
     this.animSys.triggerSwing(this.batsman);
 
-    // Trigger feedback (shake + pause + particles)
-    this.feedSys.triggerHit(this.feedback, quality, {
-      x: this.ball.x,
-      y: this.ball.y,
-      z: this.ball.z,
+    // Feedback (shake + pause + particles)
+    this.feedSys.triggerHit(this.feedback, quality, resolvedBucket, {
+      x: this.ball.x, y: this.ball.y, z: this.ball.z,
     });
 
-    // Apply velocity (even on 'miss' so ball continues plausibly)
-    this.ballSys.applyHitVelocity(this.ball, quality, this.lateralSign);
+    // ── New: sync BallController position then apply impulse ──────────────
+    this.physicsCtrl.body.position.set(this.ball.x, this.ball.y, this.ball.z);
+    this.physicsCtrl.applyImpulse(hitOut.velocity);
+
+    // Sync velocity back to legacy BallData immediately (Renderer reads it)
+    this.ball.vx = hitOut.velocity.x;
+    this.ball.vy = hitOut.velocity.y;
+    this.ball.vz = hitOut.velocity.z;
+
+    // Apply per-bucket bounce/friction to physics controller and BallData.
+    // Velocity is already set via physicsCtrl.applyImpulse above; we only need
+    // the surface-contact parameters from OUTCOME_TRAJECTORIES.
+    const traj = BALL.OUTCOME_TRAJECTORIES[resolvedBucket];
+    this.ball.bounce         = traj.bounce;
+    this.ball.groundFriction = traj.friction;
+    this.physicsCtrl.configure({ restitution: traj.bounce, friction: traj.friction });
+
+    // ── Fielder assignment: nearest fielder runs to landing zone ──────────
+    if (resolvedBucket !== 'four' && resolvedBucket !== 'six' && resolvedBucket !== 'wicket') {
+      const lp = this.physicsCtrl.predictedLanding;
+      if (lp) this._assignFielder(lp.x, lp.z);
+    }
 
     // Round resolution
     this.roundSys.applyResult(this.round, quality);
 
-    // Emit events
+    // Events
     this.events.emit('hit', {
       quality,
+      bucket: resolvedBucket,
       vx: this.ball.vx,
       vy: this.ball.vy,
       vz: this.ball.vz,
     });
     this.events.emit('multiplier', { value: this.round.multiplier });
 
-    if (quality === 'miss') {
-      this.animSys.stump(this.batsman);
-      this.sm.transition('result');
-    } else {
-      this.sm.transition('post_hit');
-      this.animSys.followThrough(this.batsman);
-    }
+    if (quality === 'miss') this.animSys.stump(this.batsman);
+    else this.animSys.followThrough(this.batsman);
+
+    this.hitResolved = true;
+    this.sm.transition(GameState.BALL_RESULT);
   }
 
-  private tickBowling(dt: number): void {
+  private tickBowlerRunup(): void {
+    const runupDuration = 0.55;
+    this.bowler.runT = Math.min(this.sm.phaseTime / runupDuration, 1);
+    if (this.bowler.runT >= 1) this.sm.transition(GameState.BALL_RELEASE);
+  }
+
+  private tickBallRelease(): void {
+    this.sm.transition(GameState.BALL_TRAVEL);
+  }
+
+  private tickBallTravel(dt: number): void {
     this.ballSys.updatePreHit(this.ball, dt);
 
-    // Advance bowler run-up progress
-    const hitTime   = this.ball.params!.hitTime;
-    this.bowler.runT = Math.min(this.ball.elapsed / hitTime, 1);
-
-    // Transition when ball enters batsman zone
     if (this.ballSys.isAtBatsman(this.ball)) {
-      if (!this.sm.transition('hit_window')) return;
-      // If swing was registered early (before window), resolve it now
-      if (this.swingPending) this.resolveSwing();
+      this.sm.transition(GameState.HIT);
     }
   }
 
-  private tickHitWindow(dt: number): void {
-    // Ball continues on pre-hit trajectory while the window is open
-    this.ballSys.updatePreHit(this.ball, dt);
-
-    const params = this.ball.params!;
-    if (!this.hitSys.isWindowOpen(this.ball.elapsed, params.hitTime)) {
-      // Window expired without a swing → auto wicket
-      if (!this.swingPending) {
-        this.swingPending = true;
-        this.roundSys.applyResult(this.round, 'miss');
-        this.animSys.stump(this.batsman);
-
-        // Give ball realistic stumps-ward velocity before post_hit
-        this.ball.vx = (Math.random() - 0.5) * 0.5;
-        this.ball.vy = 0;
-        this.ball.vz = 4.5;  // rolls toward batting stumps at Z = 0.6
-
-        this.events.emit('hit', { quality: 'miss', vx: 0, vy: 0, vz: 0 });
-        this.events.emit('multiplier', { value: 0 });
-        this.wicketPostHit = true;
-        this.sm.transition('post_hit');
-      }
-    }
+  private tickHit(): void {
+    if (this.hitResolved) return;
+    this.resolveSwing();
   }
 
-  private tickPostHit(dt: number): void {
-    this.ballSys.updatePostHit(this.ball, dt);
+  private tickBallResult(dt: number): void {
+    // ── New: fixed-step post-hit physics ──────────────────────────────────
+    this.physicsCtrl.updateFrame(dt);
+    this._updateFielder(dt);
 
-    if (this.wicketPostHit) {
-      // Wicket delivery: ball rolls toward stumps. End when it arrives or times out.
-      const reachedStumps = this.ball.z >= WORLD.STUMPS_NEAR_Z;
-      if (reachedStumps || this.sm.phaseTime >= 0.7) {
-        this.wicketPostHit = false;
-        this.ball.vx = 0; this.ball.vy = 0; this.ball.vz = 0;
-        this.sm.transition('result');
+    // Sync BallController state → legacy BallData (Renderer reads BallData)
+    const body = this.physicsCtrl.body;
+    this.ball.x  = body.position.x;
+    this.ball.y  = body.position.y;
+    this.ball.z  = body.position.z;
+    this.ball.vx = body.velocity.x;
+    this.ball.vy = body.velocity.y;
+    this.ball.vz = body.velocity.z;
+    this.ball.rx = body.spin.x;
+    this.ball.rz = body.spin.z;
+
+    const lp = this.physicsCtrl.predictedLanding;
+    this.ball.predictedLanding = lp ? { x: lp.x, z: lp.z } : null;
+
+    if (
+      this._skyActive
+      && !this._skyImpactEmitted
+      && this._skySys.snapshot?.phase === 'approaching'
+      && this._skySys.isReadyForImpact(this.physicsCtrl.body.position, this.physicsCtrl.body.elapsedTime)
+    ) {
+      this._skyImpactEmitted = true;
+      const target = this._skySys.getTarget();
+      this._skySys.triggerImpact();
+      if (target) {
+        this.feedSys.triggerSkyObjectImpact(this.feedback, { x: target.x, y: target.y, z: target.z });
+        this.events.emit('skyObjectHit', {
+          type: this._skySys.type!,
+          multiplier: this._skySys.multiplier!,
+          worldPos: { x: target.x, y: target.y, z: target.z },
+        });
       }
-      return;
     }
 
-    // Normal post-hit: after enough flight time, settle into result
-    if (this.sm.phaseTime >= TIMING.POST_HIT_MAX) {
-      this.sm.transition('result');
+    this._detectBonusCollision();
+
+    if (!this.resultEmitted && this.sm.phaseTime >= TIMING.POST_HIT_MAX) {
+      this.resultEmitted = true;
       if (this.round.outcome === 'hit') this.animSys.celebrate(this.batsman);
       this.events.emit('roundEnd', {
         multiplier: this.round.multiplier,
-        outcome:    this.round.outcome ?? 'wicket',
+        outcome: this.round.outcome ?? 'wicket',
       });
+      this.sm.transition(GameState.RESET);
     }
   }
 
-  private tickResult(): void {
-    // Hold in result until bridge calls handleInput({ type: 'reset' })
-    // Nothing to tick — animations are still running via animSys.update() above.
+  private _detectBonusCollision(): void {
+    if (!this._bonusEligible) return;
+    if (!this.ball.active) return;
+    const hit = this._bonusSys.checkCollision(this.ball);
+    if (!hit) return;
+
+    this._activeBonusHit = {
+      sourceId: hit.sourceId,
+      extraBalls: hit.extraBalls,
+      type: hit.type,
+      worldPos: hit.worldPos,
+      ttl: 0.8,
+    };
+    this.events.emit('bonusHit', {
+      sourceId: hit.sourceId,
+      type: hit.type,
+      zone: hit.zone,
+      rarityTier: hit.rarityTier,
+      worldPos: hit.worldPos,
+    });
+    this.events.emit('bonusAwarded', {
+      sourceId: hit.sourceId,
+      type: hit.type,
+      zone: hit.zone,
+      rarityTier: hit.rarityTier,
+      extraBalls: hit.extraBalls,
+      profitMult: hit.profitMult,
+      worldPos: hit.worldPos,
+    });
+  }
+
+  private tickReset(): void {
+    // Hold reset state until bridge calls handleInput({ type: 'reset' })
+  }
+
+  // ── Private: fielder simulation ────────────────────────────────────────────
+
+  private _resetFielders(): void {
+    for (let i = 0; i < this._fielderStates.length; i++) {
+      const slot = FIELDER_SLOTS[i];
+      this._fielderStates[i].x     = slot.x;
+      this._fielderStates[i].z     = slot.z;
+      this._fielderStates[i].phase = 'idle';
+    }
+    this._activeFielder = -1;
+    this._fielderTarget = null;
+  }
+
+  private _assignFielder(tx: number, tz: number): void {
+    let bestIdx  = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < this._fielderStates.length; i++) {
+      const f = this._fielderStates[i];
+      const d = Math.sqrt((f.x - tx) ** 2 + (f.z - tz) ** 2);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    if (bestIdx < 0) return;
+    this._activeFielder              = bestIdx;
+    this._fielderTarget              = { x: tx, z: tz };
+    this._fielderStates[bestIdx].phase = 'chase';
+  }
+
+  private _updateFielder(dt: number): void {
+    if (this._activeFielder < 0 || !this._fielderTarget) return;
+    const f  = this._fielderStates[this._activeFielder];
+    const tx = this._fielderTarget.x;
+    const tz = this._fielderTarget.z;
+    const dx = tx - f.x;
+    const dz = tz - f.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const step = 5.5 * dt;
+
+    if (dist > 0.1) {
+      const ratio = Math.min(step / dist, 1);
+      f.x += dx * ratio;
+      f.z += dz * ratio;
+    }
+
+    const body = this.physicsCtrl.body;
+    const bdx  = body.position.x - f.x;
+    const bdz  = body.position.z - f.z;
+    if (body.bounceCount >= 1 && body.position.y < 0.5 && Math.sqrt(bdx * bdx + bdz * bdz) < 1.8) {
+      f.phase = 'gather';
+      this.physicsCtrl.stop();
+      this._activeFielder = -1;
+    }
   }
 
   private resetToIdle(): void {
     this.sm.reset();
-    this.ball.active    = false;
+    this.ball.active           = false;
+    this.ball.predictedLanding = null;
     this.swingPending   = false;
-    this.wicketPostHit  = false;
+    this.hitResolved    = false;
+    this.resultEmitted  = false;
+    this._bonusEligible = false;
+    this.currentShot    = null;
+    this.physicsCtrl.stop();
+    this.bowlerFSM.reset();
+    this.batsmanFSM.reset();
+    this._resetFielders();
+    this._bonusSys.clear();
+    this._activeBonusHit = null;
+    this._skySys.dispose();
+    this._skyActive = false;
+    this._skyImpactEmitted = false;
   }
 }

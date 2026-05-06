@@ -1,5 +1,6 @@
 import { CAMERA, TIMING } from '../constants.js';
 import type { HitQuality } from '../events/EventBus.js';
+import type { OutcomeBucket } from '../rng/OutcomeSystem.js';
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -95,15 +96,33 @@ export class FeedbackSystem {
   triggerHit(
     state: FeedbackState,
     quality: HitQuality,
+    bucket: OutcomeBucket,
     hitPos: { x: number; y: number; z: number },
   ): void {
-    state.shakeIntensity  = quality === 'perfect' ? 0.45
+    const bucketBoost = bucket === 'six' ? 0.2 : bucket === 'four' ? 0.1 : bucket === 'wicket' ? 0.12 : 0;
+    state.shakeIntensity  = (quality === 'perfect' ? 0.45
                           : quality === 'good'    ? 0.22
-                          : 0.06;
-
-    state.pauseRemaining  = quality !== 'miss' ? TIMING.HIT_PAUSE : 0;
+                          : 0.06) + bucketBoost;
+    state.pauseRemaining  = quality !== 'miss' ? Math.min(0.05, TIMING.HIT_PAUSE) : 0;
 
     this.spawnBurst(state, hitPos, quality);
+    if (bucket === 'four' || bucket === 'six') {
+      this.spawnBurst(state, hitPos, 'perfect');
+    } else if (bucket === 'wicket') {
+      this.spawnBurst(state, hitPos, 'miss');
+      this.spawnBurst(state, { x: hitPos.x, y: hitPos.y + 0.15, z: hitPos.z }, 'miss');
+    }
+  }
+
+  /** Mid-air sky-object impact: burst + micro shake + ~0.1s hit-stop (additive). */
+  triggerSkyObjectImpact(
+    state: FeedbackState,
+    pos: { x: number; y: number; z: number },
+  ): void {
+    this.spawnBurst(state, pos, 'perfect');
+    this.spawnBurst(state, { x: pos.x, y: pos.y + 0.35, z: pos.z }, 'perfect');
+    state.shakeIntensity = Math.max(state.shakeIntensity, 0.18);
+    state.pauseRemaining = Math.max(state.pauseRemaining, 0.1);
   }
 
   /** @returns True while hit-pause is active. Callers should zero physicsDt. */

@@ -39,6 +39,17 @@ export const BALL = {
     good:    { forward: 16, vertical: 5,   lateral: 3   },  // driven four, ground level
     miss:    { forward: 2,  vertical: 0.2, lateral: 0.8 },  // feathered edge / missed swing
   },
+
+  /** Tuned for “feel”: single low+roll, double medium arc, four driven, six high. */
+  OUTCOME_TRAJECTORIES: {
+    dot:    { forward: 3.8,  vertical: 0.9,  lateral: 0.5,  bounce: 0.34, friction: 0.74, spinJitter: 0.14 },
+    single: { forward: 8.2,  vertical: 1.6,  lateral: 1.0,  bounce: 0.32, friction: 0.86, spinJitter: 0.18 },
+    double: { forward: 11.2, vertical: 4.2,  lateral: 1.5,  bounce: 0.42, friction: 0.81, spinJitter: 0.24 },
+    triple: { forward: 13.4, vertical: 6.2,  lateral: 1.9,  bounce: 0.44, friction: 0.83, spinJitter: 0.30 },
+    four:   { forward: 20.0, vertical: 1.9,  lateral: 2.2,  bounce: 0.33, friction: 0.90, spinJitter: 0.22 },
+    six:    { forward: 22.0, vertical: 13.5, lateral: 3.0,  bounce: 0.46, friction: 0.85, spinJitter: 0.32 },
+    wicket: { forward: 3.8,  vertical: 0.15, lateral: 0.35, bounce: 0.22, friction: 0.80, spinJitter: 0.10 },
+  },
 } as const;
 
 // ── Timing ────────────────────────────────────────────────────────────────────
@@ -86,7 +97,8 @@ export const CAMERA = {
   SHAKE_DECAY:  6,
 
   PRESETS: {
-    broadcast:   { pos: [0,  5.5, 14] as const, lookAt: [0, 1,  -2] as const },
+    /** Must stay in sync with `render/Camera.ts` broadcast gameplay preset. */
+    broadcast:   { pos: [0, 3.72, 10] as const, lookAt: [0, 4.2, -8.55] as const },
     bowler:      { pos: [0,  3,  -13] as const, lookAt: [0, 1,   2] as const },
     batsman:     { pos: [0,  3,   13] as const, lookAt: [0, 1,  -3] as const },
   },

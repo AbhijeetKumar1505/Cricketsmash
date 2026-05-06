@@ -10,18 +10,6 @@ export interface RoundData {
   targetMult:   number;    // server-supplied target (0 = wicket)
 }
 
-// ── Quality bonus modifiers ───────────────────────────────────────────────────
-//
-// On a hit, the result multiplier = targetMult × qualityBonus.
-// The quality bonus rewards timing accuracy with up to 20% extra.
-// A miss always resolves as a wicket regardless of the target.
-
-const QUALITY_BONUS: Record<HitQuality, number> = {
-  perfect: 1.20,
-  good:    1.08,
-  miss:    0,    // unused — miss is always a wicket
-};
-
 // ── RoundSystem ───────────────────────────────────────────────────────────────
 
 export class RoundSystem {
@@ -59,7 +47,7 @@ export class RoundSystem {
     }
 
     data.outcome    = 'hit';
-    data.multiplier = data.targetMult * QUALITY_BONUS[quality];
+    data.multiplier = data.targetMult;
     data.cumulative = data.cumulative * data.multiplier;
   }
 

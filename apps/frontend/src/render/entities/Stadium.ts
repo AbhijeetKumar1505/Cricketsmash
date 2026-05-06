@@ -8,10 +8,25 @@ const STAND_SECTIONS = 32;
 const INNER_R = 18;
 const TIER_STEP_R = 2.4;
 const TIER_STEP_H = 1.5;
-const TIERS = 4;
-const PEOPLE_PER_TIER = 8;
+const TIERS = 2;
+const PEOPLE_PER_TIER = 3;
 const BOUNDARY_R = 14;
 const SKIP_SIN_THRESHOLD = 0.45;
+
+/**
+ * Boundary sponsor hoardings — world Y is explicit so boards sit above the rope / turf
+ * (planes were effectively floor-skinned at ~0.5 m centre).
+ */
+const BOUNDARY_HOARDING = {
+  /** Number of vertical bands (e.g. lower + upper stack like real stadium boards). */
+  rows: [
+    /** Y nudged to wheat-fence pivot (1.2); posts lengthened slightly so planks read anchored. */
+    { centerY: 0.5, boardW: 3.72, boardH: 0.82, postDepth: 0.65, postYOffset: -0.6 },
+  ] as const,
+  /** Just infield of `buildWheatFence` (~BOUNDARY_R+1.2) so boards sit on the pole line, not floating inside. */
+  radius: BOUNDARY_R + 1.14,
+  lookTargetYBias: 0.035,
+} as const;
 
 const SPONSORS: { name: string; bg: string; fg: string }[] = [
   { name: 'Boka Cola', bg: '#d83f43', fg: '#ffffff' },
@@ -54,6 +69,12 @@ function makeOutfieldTexture(): THREE.CanvasTexture {
     cx.lineTo(size, i * bandH);
     cx.stroke();
   }
+  for (let i = 0; i < 2200; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    cx.fillStyle = i % 3 === 0 ? 'rgba(255,255,255,0.018)' : 'rgba(0,0,0,0.022)';
+    cx.fillRect(x, y, 1.6, 1.6);
+  }
 
   const tex = toTexture(cv);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -84,6 +105,12 @@ function makePitchTexture(): THREE.CanvasTexture {
   cx.strokeStyle = 'rgba(145,110,64,0.12)';
   cx.lineWidth = 2;
   cx.strokeRect(8, 8, w - 16, h - 16);
+  for (let i = 0; i < 620; i++) {
+    const x = 10 + Math.random() * (w - 20);
+    const y = 10 + Math.random() * (h - 20);
+    cx.fillStyle = i % 2 === 0 ? 'rgba(120,90,50,0.03)' : 'rgba(255,255,255,0.02)';
+    cx.fillRect(x, y, 1.4, 1.4);
+  }
 
   return toTexture(cv);
 }
@@ -224,11 +251,12 @@ export class StadiumEntity {
     this._time += dt;
 
     for (const sprite of this._crowdSprites) {
-      const bounce = Math.sin(this._time * 2.4 + sprite.phase) * 0.05;
+      const sway = Math.sin(this._time * 1.5 + sprite.phase) * 0.035;
+      const bob = Math.sin(this._time * 1.8 + sprite.phase) * 0.012;
       sprite.mesh.position.set(
-        sprite.basePosition.x,
-        sprite.basePosition.y + bounce,
-        sprite.basePosition.z,
+        sprite.basePosition.x + sway,
+        sprite.basePosition.y + bob,
+        sprite.basePosition.z + Math.cos(this._time * 1.2 + sprite.phase) * 0.02,
       );
       sprite.mesh.scale.setScalar(sprite.scale);
       if (camera) sprite.mesh.lookAt(camera.position);
@@ -236,12 +264,13 @@ export class StadiumEntity {
 
     for (const cloud of this._clouds) {
       cloud.mesh.position.x = cloud.basePosition.x + Math.sin(this._time * 0.18 + cloud.phase) * 0.8;
-      cloud.mesh.position.y = cloud.basePosition.y + Math.sin(this._time * 0.22 + cloud.phase) * 0.18;
+      cloud.mesh.position.y = cloud.basePosition.y + Math.sin(this._time * 0.22 + cloud.phase) * 0.08;
       if (camera) cloud.mesh.lookAt(camera.position);
     }
 
     for (const tuft of this._tufts) {
-      tuft.mesh.position.y = tuft.baseY + Math.sin(this._time * 1.8 + tuft.phase) * 0.05;
+      tuft.mesh.position.y = tuft.baseY;
+      tuft.mesh.rotation.z = Math.sin(this._time * 1.4 + tuft.phase) * 0.04;
     }
 
     const sponsorIdx = Math.floor(this._time / 10);
@@ -283,6 +312,8 @@ export class StadiumEntity {
     );
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(0, 0.003, MID_Z);
+    mesh.scale.x = 0.9;
+    mesh.scale.z = 0.85;
     this.root.add(mesh);
   }
 
@@ -437,18 +468,21 @@ export class StadiumEntity {
           const px = Math.cos(angle) * r;
           const pz = MID_Z + Math.sin(angle) * r;
           const scale = 0.72 + rng(seed + 1) * 0.24;
-
-          const mesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.55, 0.55),
-            new THREE.MeshBasicMaterial({
-              map: assets.audience[(seed + p + tier) % assets.audience.length],
-              transparent: true,
-              alphaTest: 0.05,
-              side: THREE.DoubleSide,
-              depthWrite: false,
-            }),
-          );
+          const hue = 0.08 + rng(seed + 7) * 0.72;
+          const sat = 0.45 + rng(seed + 9) * 0.25;
+          const lit = 0.45 + rng(seed + 11) * 0.2;
+          const mat = new THREE.MeshBasicMaterial({
+            map: assets.audience[(seed + p + tier) % assets.audience.length],
+            transparent: true,
+            alphaTest: 0.05,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            opacity: 0.74,
+          });
+          mat.color = new THREE.Color().setHSL(hue, sat, lit);
+          const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.55), mat);
           mesh.position.set(px, py, pz);
+          mesh.rotation.y = (rng(seed + 13) - 0.5) * 0.4;
           mesh.scale.setScalar(scale);
           this._crowd.add(mesh);
           this._crowdSprites.push({
@@ -537,21 +571,58 @@ export class StadiumEntity {
     for (const brand of SPONSORS) this._sponsorTextures.push(makeSponsorTexture(brand));
 
     const boards = 16;
-    const r = BOUNDARY_R + 0.6;
+    const r = BOUNDARY_HOARDING.radius;
     for (let i = 0; i < boards; i++) {
       const angle = (i / boards) * Math.PI * 2;
       if (Math.sin(angle) > SKIP_SIN_THRESHOLD) continue;
 
-      const board = new THREE.Mesh(
-        new THREE.BoxGeometry(3.8, 0.85, 0.08),
-        new THREE.MeshBasicMaterial({
-          map: this._sponsorTextures[i % this._sponsorTextures.length],
-        }),
-      );
-      board.position.set(Math.cos(angle) * r, 0.5, MID_Z + Math.sin(angle) * r);
-      board.lookAt(0, board.position.y, MID_Z);
-      this._sponsorMeshes.push(board);
-      this.root.add(board);
+      for (let row = 0; row < BOUNDARY_HOARDING.rows.length; row++) {
+        const rowCfg = BOUNDARY_HOARDING.rows[row]!;
+        const texIdx = (i + row * 5) % this._sponsorTextures.length;
+
+        const boardMat = new THREE.MeshBasicMaterial({
+          map: this._sponsorTextures[texIdx]!,
+          side: THREE.DoubleSide,
+        });
+        boardMat.color.setHex(0xffffff);
+        boardMat.color.offsetHSL(0, 0, ((i + row) % 5 - 2) * 0.012);
+
+        const board = new THREE.Mesh(
+          new THREE.PlaneGeometry(rowCfg.boardW, rowCfg.boardH),
+          boardMat,
+        );
+        const wy = rowCfg.centerY;
+        board.position.set(Math.cos(angle) * r, wy, MID_Z + Math.sin(angle) * r);
+        board.lookAt(0, wy + BOUNDARY_HOARDING.lookTargetYBias, MID_Z);
+
+        const postMat = new THREE.MeshBasicMaterial({ color: 0x6a553f });
+        const postH = rowCfg.postDepth;
+        const py = rowCfg.postYOffset;
+        const postHalf = rowCfg.boardW * 0.44;
+        const postL = new THREE.Mesh(new THREE.BoxGeometry(0.06, postH, 0.06), postMat);
+        const postR = new THREE.Mesh(new THREE.BoxGeometry(0.06, postH, 0.06), postMat);
+        postL.position.set(-postHalf, py, 0);
+        postR.position.set(postHalf, py, 0);
+        board.add(postL);
+        board.add(postR);
+
+        const shadowDrop = Math.max(0.35, Math.abs(py) - postH * 0.5 + rowCfg.boardH * 0.48);
+        const boardShadow = new THREE.Mesh(
+          new THREE.CircleGeometry(0.32 + row * 0.06, 20),
+          new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            transparent: true,
+            opacity: row === 0 ? 0.14 : 0.08,
+            depthWrite: false,
+          }),
+        );
+        boardShadow.rotation.x = -Math.PI / 2;
+        boardShadow.position.set(0, -shadowDrop, 0.015);
+        board.add(boardShadow);
+
+        this._sponsorMeshes.push(board);
+        this.root.add(board);
+      }
     }
   }
 

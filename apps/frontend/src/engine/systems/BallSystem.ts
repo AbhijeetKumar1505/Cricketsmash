@@ -1,5 +1,7 @@
 import { WORLD, BALL } from '../constants.js';
 import type { HitQuality, BowlerType } from '../events/EventBus.js';
+import type { OutcomeBucket } from '../rng/OutcomeSystem.js';
+import type { ShotResult } from '../rng/OutcomeSystem.js';
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
@@ -8,6 +10,7 @@ export interface BowlParams {
   /** Seconds for the ball to travel from RELEASE_Z to BATSMAN_Z. */
   hitTime: number;
   outcome: 'hit' | 'wicket';
+  bucket: OutcomeBucket;
 }
 
 export interface BallData {
@@ -19,6 +22,9 @@ export interface BallData {
   rx: number; ry: number; rz: number;
   params: BowlParams | null;
   active: boolean;
+  predictedLanding: { x: number; z: number } | null;
+  bounce: number;
+  groundFriction: number;
 }
 
 // ── Pre-hit trajectory (deterministic Bezier) ─────────────────────────────────
@@ -84,6 +90,9 @@ export class BallSystem {
     ball.elapsed = 0;
     ball.params  = params;
     ball.active  = true;
+    ball.predictedLanding = null;
+    ball.bounce = BALL.RESTITUTION;
+    ball.groundFriction = BALL.FRICTION;
   }
 
   /**
@@ -108,13 +117,18 @@ export class BallSystem {
   applyHitVelocity(
     ball: BallData,
     quality: HitQuality,
-    lateralSign: number,   // +1 = off-side, -1 = leg-side
+    bucket: OutcomeBucket,
+    shot: ShotResult,
   ): void {
-    const s       = BALL.HIT_SPEEDS[quality];
-    const jitter  = (Math.random() - 0.5) * 0.25;
-    ball.vx       = lateralSign * s.lateral + jitter;
-    ball.vy       = s.vertical;
-    ball.vz       = s.forward;   // positive Z = away from bowler (boundary direction)
+    const profile = BALL.OUTCOME_TRAJECTORIES[bucket];
+    const qualityMult = quality === 'perfect' ? 1.08 : quality === 'good' ? 1.0 : 0.85;
+    const speed = (10 + shot.power * 15) * qualityMult;
+    ball.vx = Math.sin(shot.direction) * speed;
+    ball.vy = shot.power * 8 * (quality === 'perfect' ? 1.06 : 1);
+    ball.vz = Math.max(2.5, Math.cos(shot.direction) * speed);
+    ball.bounce = profile.bounce;
+    ball.groundFriction = profile.friction;
+    ball.predictedLanding = this.predictLandingPoint(ball);
   }
 
   /**
@@ -129,9 +143,9 @@ export class BallSystem {
 
     if (ball.y <= BALL.RADIUS) {
       ball.y   = BALL.RADIUS;
-      ball.vy  = Math.abs(ball.vy) * BALL.RESTITUTION;
-      ball.vx *= BALL.FRICTION;
-      ball.vz *= BALL.FRICTION;
+      ball.vy  = Math.abs(ball.vy) * ball.bounce;
+      ball.vx *= ball.groundFriction;
+      ball.vz *= ball.groundFriction;
     }
 
     // Spin from velocity magnitude
@@ -150,5 +164,18 @@ export class BallSystem {
 
   deactivate(ball: BallData): void {
     ball.active = false;
+    ball.predictedLanding = null;
+  }
+
+  private predictLandingPoint(ball: BallData): { x: number; z: number } {
+    const g = BALL.GRAVITY;
+    const h = Math.max(0, ball.y - BALL.RADIUS);
+    const vy = ball.vy;
+    const disc = Math.max(0, vy * vy + 2 * g * h);
+    const t = (vy + Math.sqrt(disc)) / g;
+    return {
+      x: ball.x + ball.vx * t,
+      z: ball.z + ball.vz * t,
+    };
   }
 }

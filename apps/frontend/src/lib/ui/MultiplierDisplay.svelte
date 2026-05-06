@@ -4,9 +4,10 @@
    * Premium, high-impact broadcast-style multiplier display.
    * Part of the Doodle Cricket / Cricket Crash stadium HUD.
    */
-  let { value = 1, status = "waiting" } = $props<{
+  let { value = 1, status = "waiting", pulseKey = 0 } = $props<{
     value: number;
     status: "waiting" | "bowling" | "hitting" | "result" | "wicket";
+    pulseKey?: number;
   }>();
 
   // Reactive color spectrum based on multiplier magnitude
@@ -54,7 +55,7 @@
   class="multiplier-container"
   class:crashed={status === "wicket"}
 >
-  <div class="multiplier-shell">
+  <div class="multiplier-shell" class:counter-punch={pulseKey > 0}>
     <div 
       class="multiplier-text {glowClass} font-headline tabular-nums"
       style="color: {multiplierColor}; --accent-rgb: {multiplierRgb};"
@@ -80,12 +81,17 @@
 
   .multiplier-shell {
     position: relative;
-    padding: 0 1rem;
+    padding: 0.25rem 1.1rem 0.15rem;
     transform: perspective(1000px) rotateX(10deg);
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(3, 8, 18, 0.46);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32);
   }
 
   .multiplier-text {
-    font-size: 5.5rem;
+    font-size: 5rem;
     line-height: 1;
     letter-spacing: -0.04em;
     filter: drop-shadow(0 0 20px rgba(var(--accent-rgb), 0.3));
@@ -100,10 +106,10 @@
   }
 
   .multiplier-label {
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     font-weight: 900;
     letter-spacing: 0.4em;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.62);
     text-transform: uppercase;
     margin-top: -0.5rem;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
@@ -122,13 +128,23 @@
     50% { transform: translateY(-4px) scale(1.02); }
   }
 
+  .counter-punch {
+    animation: counter-punch 0.34s ease-out;
+  }
+
+  @keyframes counter-punch {
+    0% { transform: perspective(1000px) rotateX(10deg) scale(0.9); }
+    50% { transform: perspective(1000px) rotateX(10deg) scale(1.07); }
+    100% { transform: perspective(1000px) rotateX(10deg) scale(1); }
+  }
+
   .crashed .multiplier-text {
     animation: electric-surge 0.4s ease-in-out infinite;
   }
 
   @media (max-width: 768px) {
     .multiplier-text {
-      font-size: 4rem;
+      font-size: 3.4rem;
     }
     .multiplier-x {
       font-size: 1.8rem;

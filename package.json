@@ -2,18 +2,29 @@
   "name": "cricket-crash",
   "private": true,
   "packageManager": "pnpm@10.5.0",
+  "pnpm": {
+    "overrides": {
+      "esbuild": "0.25.12"
+    }
+  },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@types/node": "^22.10.5",
-    "svelte": "^5.16.0"
+    "@vitest/ui": "^4.1.5",
+    "svelte": "^5.16.0",
+    "vitest": "^4.1.5"
   },
   "scripts": {
     "bootstrap": "npx --yes pnpm@10.5.0 install && npm run build:packages",
     "build:packages": "npx --yes pnpm@10.5.0 -r --filter \"./packages/*\" run build",
     "build": "npx --yes pnpm@10.5.0 -r run build",
+    "test": "npx --yes pnpm@10.5.0 --filter @cricket-crash/fairness run test",
+    "test:fairness": "npx --yes pnpm@10.5.0 --filter @cricket-crash/fairness run test",
+    "test:fairness:slow": "npx --yes pnpm@10.5.0 --filter @cricket-crash/fairness run test:slow",
+    "replay:decomposition": "node ./tools/replay-decomposition.mjs",
     "dev": "npm run build:packages && npx --yes pnpm@10.5.0 --filter @cricket-crash/frontend run dev",
     "dev:frontend": "npm run build:packages && npx --yes pnpm@10.5.0 --filter @cricket-crash/frontend dev",
     "typecheck": "npx --yes pnpm@10.5.0 -r run typecheck",

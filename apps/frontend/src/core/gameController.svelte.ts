@@ -26,7 +26,10 @@ import {
 } from './stakeClient.js';
 import type { BowlerType } from '../engine/physics/ballTrajectory.js';
 import { ParseAmount, API_MULTIPLIER, GAME_MODES } from './stakeClient.js';
+import type { DecomposeTelemetryEvent } from '@cricket-crash/fairness';
 import { generateDeliveries, type Delivery } from './modeEngine.js';
+import type { SkyObjectType } from '../engine/sky/types.js';
+import { getForcedDecomposeOptions } from './devMock.js';
 
 export type HitQuality = 'perfect' | 'good' | 'edge' | 'miss' | 'none';
 export type VisualPhase = 'idle' | 'bowl' | 'hit' | 'wicket' | 'celebrate';
@@ -59,6 +62,16 @@ interface BetConfig {
   default: number;
 }
 
+interface StakeTicket {
+  id: number;
+  source: 'main' | 'bonus';
+  betAmountApi: number;y
+  entryMultiplier: number;
+  bonusProductAtEntry: number;
+  settled: boolean;
+  betId?: number;
+}
+
 // ── Reactive game state (single $state object — safe to export) ─────────────
 export const game = $state({
   phase: 'initializing' as GamePhase,
@@ -88,11 +101,80 @@ export const game = $state({
   overSummary: [] as DeliveryOutcome[],
   isSwinging: false,
   hitQuality: 'none' as 'perfect' | 'good' | 'edge' | 'miss' | 'none',
+  baseBallCount: 6,
+  bonusBallCount: 0,
+  totalBallCount: 6,
+  pendingRewardToast: null as null | {
+    text: string;
+    color: string;
+    key: number;
+  },
+  bonusStreak: 0,
+  /** Stacking payout-preview multiplier from sky / rover / spider bonus hits (resets each new stake session). */
+  bonusProfitMultProduct: 1,
+  /** Incoming sky bonus type for this delivery (null if none). */
+  activeSkyObject: null as SkyObjectType | null,
+  /** Short-lived UI toast for sky impact (+10x / +100x). */
+  skyHitToast: null as null | { type: SkyObjectType; multiplier: number; key: number },
+  /** Broadcast scorecard totals for the most recently settled session. */
+  lastSettledBetAmount: 0,
+  lastSettledPayout: 0,
+  lastSettledMultiplier: 0,
 });
 
 // ── Internal state ──────────────────────────────────────────────────────────
 let client: StakeGameClient | null = null;
 let historyCounter = 0;
+let _bonusQueue: Promise<void> = Promise.resolve();
+let _tickets: StakeTicket[] = [];
+let _ticketCounter = 0;
+let _activeMainTicketId: number | null = null;
+
+function effectiveTicketMultiplier(
+  displayMultiplier: number,
+  entryMultiplier: number,
+  bonusProfitMultProduct: number,
+): number {
+  const base = displayMultiplier / Math.max(0.01, entryMultiplier);
+  return Math.max(0, base * bonusProfitMultProduct);
+}
+
+function effectiveMultiplierForTicket(ticket: StakeTicket): number {
+  const displayLeg = game.displayMultiplier / Math.max(0.01, ticket.entryMultiplier);
+  const bonusLeg = game.bonusProfitMultProduct / Math.max(0.01, ticket.bonusProductAtEntry);
+  return Math.max(0, displayLeg * bonusLeg);
+}
+
+function createTicket(input: Omit<StakeTicket, 'id' | 'settled'>): StakeTicket {
+  _ticketCounter += 1;
+  const t: StakeTicket = { id: _ticketCounter, settled: false, ...input };
+  _tickets.push(t);
+  return t;
+}
+
+function findTicket(ticketId: number | null): StakeTicket | null {
+  if (ticketId === null) return null;
+  return _tickets.find((t) => t.id === ticketId) ?? null;
+}
+
+function betIdFromRound(round: PlayResult['round'] | undefined): number {
+  const r = round as { betID?: number } | undefined;
+  return typeof r?.betID === 'number' ? r.betID : Date.now();
+}
+
+function emitDecomposerTelemetry(
+  c: StakeGameClient,
+  events: DecomposeTelemetryEvent[],
+  ctx: Record<string, string | number>,
+): void {
+  for (const ev of events) {
+    try {
+      void c.sendEvent(JSON.stringify({ v: 1, ...ctx, ...ev }));
+    } catch {
+      /* non-fatal */
+    }
+  }
+}
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
@@ -165,20 +247,44 @@ export async function placeBet(): Promise<void> {
   try {
     const result: PlayResult = await client.play(apiAmount, mode);
     game.balance = ParseAmount(result.balance.amount);
-    
+
+    const betID = betIdFromRound(result.round);
+    try {
+      void client.sendEvent(
+        JSON.stringify({
+          v: 1,
+          kind: 'bet_placed',
+          betID,
+          mode,
+          payoutMultiplier: result.payoutMultiplier,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+
     // Calculate how many balls are left in the over
     const startIdx = isMidSession ? game.currentBallIdx + 1 : 0;
-    
-    // Generate the new sequence for these remaining balls
-    const newSeq = generateDeliveries(result.payoutMultiplier, mode);
-    
+
+    const forced = game.isDevMode ? getForcedDecomposeOptions() : undefined;
+    const { deliveries: newSeq, telemetry: decompTelemetry } = generateDeliveries(
+      result.payoutMultiplier,
+      mode,
+      { betID, ...forced },
+    );
+    emitDecomposerTelemetry(client, decompTelemetry, { betID, mode });
+
     if (!isMidSession) {
       // Starting a fresh session
       game.currentDeliveries = newSeq;
-      game.overSummary = new Array(6).fill(null);
+      game.overSummary = new Array(newSeq.length).fill(null);
       game.currentBallIdx = 0;
       game.displayMultiplier = 1;
       game.entryMultiplier = 1;
+      game.baseBallCount = 6;
+      game.bonusBallCount = 0;
+      game.totalBallCount = newSeq.length || 6;
+      game.bonusProfitMultProduct = 1;
       game.sessionActive = true;
       game.deliveryKey++;
       game.phase = 'animating';
@@ -197,8 +303,18 @@ export async function placeBet(): Promise<void> {
       // bridge.updateDeliveries(game.currentDeliveries); // To be implemented if mid-session changing needed in 3D
       
       game.entryMultiplier = game.displayMultiplier;
+      game.totalBallCount = game.currentDeliveries.length || 6;
+      game.bonusBallCount = Math.max(0, game.totalBallCount - game.baseBallCount);
     }
 
+    const mainTicket = createTicket({
+      source: 'main',
+      betAmountApi: apiAmount,
+      entryMultiplier: game.entryMultiplier,
+      bonusProductAtEntry: game.bonusProfitMultProduct,
+      betId: betID,
+    });
+    _activeMainTicketId = mainTicket.id;
     game.betActive = true;
     game.canCashout = result.payoutMultiplier > 0;
     game.payoutMultiplier = result.payoutMultiplier;
@@ -212,11 +328,28 @@ export async function placeBet(): Promise<void> {
 // Convert a modeEngine Delivery to the engine's DeliveryOutcome for triggerBowl().
 function makeEngineOutcome(delivery: Delivery) {
   if (!_bridge) return undefined;
-  const isWicket = delivery.outcome.kind === 'wicket';
+  if (delivery.outcome.kind === 'wicket') {
+    return _bridge.makeOutcome(
+      'wicket',
+      (delivery.bowlerType as string).toLowerCase() as 'fast' | 'spin' | 'swing',
+      0,
+      'wicket',
+    );
+  }
+
+  const runs = delivery.outcome.runs;
+  const bucket = runs <= 0 ? 'dot'
+    : runs === 1 ? 'single'
+    : runs === 2 ? 'double'
+    : runs === 3 ? 'triple'
+    : runs === 4 ? 'four'
+    : 'six';
   return _bridge.makeOutcome(
-    isWicket ? 'wicket' : 'hit',
+    'hit',
     (delivery.bowlerType as string).toLowerCase() as 'fast' | 'spin' | 'swing',
-    isWicket ? 0 : delivery.endMultiplier,
+    delivery.endMultiplier,
+    bucket,
+    delivery.skyObject ?? undefined,
   );
 }
 
@@ -239,6 +372,64 @@ function advanceBall(): void {
   _bridge?.triggerBowl(nextDelivery ? makeEngineOutcome(nextDelivery) : undefined);
 }
 
+async function requestBonusDelivery(sourceId: string): Promise<void> {
+  if (!client || !game.sessionActive) return;
+
+  const apiAmount = Math.round(game.betAmount * API_MULTIPLIER);
+  const result: PlayResult = await client.play(apiAmount, GAME_MODES.POWERPLAY);
+  game.balance = ParseAmount(result.balance.amount);
+
+  const betID = betIdFromRound(result.round);
+  createTicket({
+    source: 'bonus',
+    betAmountApi: apiAmount,
+    entryMultiplier: Math.max(0.01, game.displayMultiplier),
+    bonusProductAtEntry: game.bonusProfitMultProduct,
+    betId: betID,
+  });
+  const forced = game.isDevMode ? getForcedDecomposeOptions() : undefined;
+  const { deliveries: bonusSeq, telemetry: bonusTelemetry } = generateDeliveries(
+    result.payoutMultiplier,
+    GAME_MODES.POWERPLAY,
+    { betID, ...forced },
+  );
+  emitDecomposerTelemetry(client, bonusTelemetry, { betID, mode: GAME_MODES.POWERPLAY });
+  const bonusDelivery = bonusSeq[0];
+  if (!bonusDelivery) return;
+
+  // Keep multiplier timeline continuous across appended bonus deliveries.
+  const chainedStart = Math.max(0, game.displayMultiplier);
+  const chainedEnd = Math.max(0, chainedStart * bonusDelivery.endMultiplier);
+  const chainedBonusDelivery: Delivery = {
+    ...bonusDelivery,
+    startMultiplier: chainedStart,
+    endMultiplier: chainedEnd,
+    outcome:
+      bonusDelivery.outcome.kind === 'runs'
+        ? { ...bonusDelivery.outcome, multiplier: chainedEnd }
+        : bonusDelivery.outcome,
+  };
+
+  game.currentDeliveries = [...game.currentDeliveries, chainedBonusDelivery];
+  game.totalBallCount = game.currentDeliveries.length || 6;
+  game.bonusBallCount = Math.max(0, game.totalBallCount - game.baseBallCount);
+  console.log(`[GameController] Awarded bonus ball from ${sourceId}. Total now ${game.totalBallCount}`);
+}
+
+function queueBonusBalls(extraBalls: number, sourceId: string): void {
+  for (let i = 0; i < extraBalls; i++) {
+    _bonusQueue = _bonusQueue.then(async () => {
+      try {
+        await requestBonusDelivery(sourceId);
+      } catch (err) {
+        game.errorMessage = err instanceof Error ? err.message : 'Bonus bet failed';
+        game.phase = 'error';
+        console.error('[GameController] Bonus delivery failed:', err);
+      }
+    });
+  }
+}
+
 // Wire engine → game state callbacks. Uses module-level _bridge set by bindBridge().
 function setupBridgeCallbacks() {
   // Guard: _bridge must exist, and we must not double-register on the same bridge.
@@ -250,12 +441,13 @@ function setupBridgeCallbacks() {
       // New delivery started — clear prior hit state.
       game.visualPhase = 'bowl';
       game.isSwinging  = false;
+      game.activeSkyObject = null;
 
       // Update the 3D scoreboard: show current ball in the session
       _bridge?.updateScoreboard(
         game.currentBallIdx,
-        game.currentDeliveries.length || 6,
-        game.displayMultiplier,
+        game.totalBallCount || game.currentDeliveries.length || 6,
+        game.displayMultiplier * game.bonusProfitMultProduct,
       );
 
       // Auto-swing: register the swing during the 'bowling' phase so the engine
@@ -273,7 +465,7 @@ function setupBridgeCallbacks() {
       }
     },
 
-    onHitResult: (quality: string) => {
+    onHitResult: (quality: string, _bucket: string) => {
       game.hitQuality = quality as typeof game.hitQuality;
       if (quality !== 'miss') {
         game.visualPhase = 'hit';
@@ -320,8 +512,8 @@ function setupBridgeCallbacks() {
       // Refresh the 3D scoreboard with the updated multiplier
       _bridge?.updateScoreboard(
         game.currentBallIdx,
-        game.currentDeliveries.length || 6,
-        game.displayMultiplier,
+        game.totalBallCount || game.currentDeliveries.length || 6,
+        game.displayMultiplier * game.bonusProfitMultProduct,
       );
 
       game.visualPhase = 'celebrate';
@@ -331,17 +523,52 @@ function setupBridgeCallbacks() {
       // Total inter-ball gap = 3500 ms.
       setTimeout(advanceBall, 3500);
     },
+
+    onSkyObjectSpawned: ({ type }) => {
+      game.activeSkyObject = type;
+    },
+
+    onSkyObjectHit: ({ type, multiplier }) => {
+      game.skyHitToast = { type, multiplier, key: Date.now() };
+      game.activeSkyObject = null;
+      setTimeout(() => {
+        if (game.skyHitToast && Date.now() - game.skyHitToast.key > 900) {
+          game.skyHitToast = null;
+        }
+      }, 950);
+    },
+
+    onBonusAwarded: ({ extraBalls, sourceId, type, profitMult }) => {
+      if (!game.sessionActive) return;
+
+      // Keep bonus value in multiplier flow (not as direct balance credit).
+      if (profitMult > 1) {
+        game.bonusProfitMultProduct *= profitMult;
+      }
+
+      if (extraBalls <= 0) return;
+      game.bonusStreak += 1;
+      game.pendingRewardToast = {
+        text: `+${extraBalls} BALL${extraBalls > 1 ? 'S' : ''}`,
+        color: type === 'plus3' ? '#ffc94f' : type === 'plus2' ? '#58d6ff' : type === 'multiplier' ? '#ff4f5f' : '#ffe17f',
+        key: Date.now(),
+      };
+      queueBonusBalls(extraBalls, sourceId);
+      setTimeout(() => {
+        if (game.pendingRewardToast && Date.now() - game.pendingRewardToast.key > 900) {
+          game.pendingRewardToast = null;
+        }
+      }, 950);
+    },
   });
 }
 
 async function handleSessionEnd(_finalMult: number) {
-  // If user was still in the bet, they lose (if wicket) or auto-win (if ball 6)
-  if (game.betActive) {
+  // Settle all open tickets against the final session multiplier state.
+  if (_tickets.some((t) => !t.settled)) {
     game.betActive = false;
     game.canCashout = false;
-    
-    const apiAmount = Math.round(game.betAmount * API_MULTIPLIER);
-    void finalizeRound(game.payoutMultiplier, apiAmount);
+    await finalizeOpenTickets();
   }
 
   game.sessionActive = false;
@@ -360,20 +587,49 @@ export async function cashout(): Promise<void> {
     const finalBalance = await client.endRound();
     game.balance = ParseAmount(finalBalance.amount);
     
-    // Record history based on ACTUAL multiplier at cashout, not predicted final
-    const userMult = game.displayMultiplier / Math.max(0.01, game.entryMultiplier);
-    const apiAmount = Math.round(game.betAmount * API_MULTIPLIER);
-    void finalizeRound(userMult, apiAmount, true);
+    const mainTicket = findTicket(_activeMainTicketId);
+    if (mainTicket && !mainTicket.settled) {
+      const userMult = effectiveMultiplierForTicket(mainTicket);
+      await finalizeTicket(mainTicket, userMult, true);
+    }
 
     game.betActive = false;
     game.canCashout = false;
+    _activeMainTicketId = null;
   } catch (err) {
     console.error('[GameController] Cashout failed:', err);
   }
 }
 
-async function finalizeRound(mult: number, betAmountApi: number, alreadyEnded = false): Promise<void> {
+async function finalizeOpenTickets(): Promise<void> {
   if (!client) return;
+  try {
+    if (client.isRoundActive()) {
+      const finalBalance = await client.endRound();
+      game.balance = ParseAmount(finalBalance.amount);
+    }
+    let totalBetApi = 0;
+    let totalPayoutApi = 0;
+    for (const ticket of _tickets) {
+      if (ticket.settled) continue;
+      const mult = effectiveMultiplierForTicket(ticket);
+      const payoutApi = await finalizeTicket(ticket, mult, true);
+      totalBetApi += ticket.betAmountApi;
+      totalPayoutApi += payoutApi;
+    }
+    if (totalBetApi > 0) {
+      game.lastSettledBetAmount = totalBetApi / API_MULTIPLIER;
+      game.lastSettledPayout = totalPayoutApi / API_MULTIPLIER;
+      game.lastSettledMultiplier = totalPayoutApi / Math.max(1, totalBetApi);
+    }
+    _activeMainTicketId = null;
+  } catch (err) {
+    console.error('[GameController] finalizeOpenTickets failed:', err);
+  }
+}
+
+async function finalizeTicket(ticket: StakeTicket, mult: number, alreadyEnded = false): Promise<number> {
+  if (!client) return 0;
 
   try {
     if (!alreadyEnded && client.isRoundActive()) {
@@ -383,7 +639,7 @@ async function finalizeRound(mult: number, betAmountApi: number, alreadyEnded = 
 
     // High-stakes safe multiplication within micro-units
     // Use BigInt if amounts exceed safe integers, but here we stay within ~9e15 
-    const payout = mult > 0 ? Math.floor(Number(BigInt(betAmountApi) * BigInt(Math.round(mult * 10000))) / 10000) : 0;
+    const payout = mult > 0 ? Math.floor(Number(BigInt(ticket.betAmountApi) * BigInt(Math.round(mult * 10000))) / 10000) : 0;
     
     historyCounter++;
     game.roundHistory = [
@@ -391,14 +647,17 @@ async function finalizeRound(mult: number, betAmountApi: number, alreadyEnded = 
         id: historyCounter,
         payoutMultiplier: mult,
         outcome: payoutMultiplierToCricketOutcome(mult),
-        betAmount: betAmountApi / API_MULTIPLIER,
+        betAmount: ticket.betAmountApi / API_MULTIPLIER,
         payout: payout / API_MULTIPLIER,
         timestamp: Date.now(),
       },
       ...game.roundHistory.slice(0, 49),
     ];
+    ticket.settled = true;
+    return payout;
   } catch (err) {
     console.error('[GameController] EndRound failed:', err);
+    return 0;
   }
 }
 
@@ -412,6 +671,20 @@ export function returnToIdle(): void {
   game.currentDeliveries = [];
   game.overSummary = [];
   game.currentBallIdx = 0;
+  game.baseBallCount = 6;
+  game.bonusBallCount = 0;
+  game.totalBallCount = 6;
+  game.pendingRewardToast = null;
+  game.bonusStreak = 0;
+  game.bonusProfitMultProduct = 1;
+  game.activeSkyObject = null;
+  game.skyHitToast = null;
+  game.lastSettledBetAmount = 0;
+  game.lastSettledPayout = 0;
+  game.lastSettledMultiplier = 0;
+  _bonusQueue = Promise.resolve();
+  _tickets = [];
+  _activeMainTicketId = null;
 }
 
 /** Dismiss the wicket overlay without resetting session — leaves broadcast phase so scorecard shows. */
@@ -449,6 +722,18 @@ export function setGameMode(mode: GameModeName): void {
  */
 export function setPlaybackTimeScale(_scale: number): void {
   // To be re-implemented if needed, but GameLoop now uses constant dt or handles its own trauma
+}
+
+export function getEffectiveTicketMultiplier(): number {
+  const mainTicket = findTicket(_activeMainTicketId);
+  if (mainTicket && !mainTicket.settled) {
+    return effectiveMultiplierForTicket(mainTicket);
+  }
+  return effectiveTicketMultiplier(
+    game.displayMultiplier,
+    game.entryMultiplier,
+    game.bonusProfitMultProduct,
+  );
 }
 
 /**

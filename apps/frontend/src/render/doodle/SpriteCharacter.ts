@@ -30,16 +30,11 @@ export class SpriteCharacter {
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = false;
+
     this.currentKey = 'idle';
   }
 
-  billboard(camera: THREE.Camera): void {
-    this.mesh.lookAt(camera.position);
-  }
-
-  updateFromAnim(anim: CharacterAnimState, camera: THREE.Camera): void {
-    this.billboard(camera);
-
+  updateFromAnim(anim: CharacterAnimState, _camera: THREE.Camera): void {
     let key: string;
     if (this.type === 'batsman') key = this.mapBatsmanState(anim);
     else if (this.type === 'bowler') key = this.mapBowlerState(anim);
@@ -82,7 +77,7 @@ export class SpriteCharacter {
       case 'bowler':
         return this.assets.bowler[key as BowlerState] ?? this.assets.bowler.idle;
       case 'fielder':
-        return this.assets.fielders[this.variant % this.assets.fielders.length];
+        return this.assets.fielders[Math.max(0, this.variant - 1) % this.assets.fielders.length];
       case 'keeper':
         return this.assets.keeper;
       default:

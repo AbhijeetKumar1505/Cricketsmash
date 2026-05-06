@@ -52,30 +52,44 @@ Single-player 6-ball over for offline and demo use. Non-authoritative and clearl
 
 ## 3. Canonical Economic Model
 
-All modes share a single multiplier accumulation model:
+Canonical economic constants now live in `packages/fairness/src/economicModel.ts`, and Stake round decomposition logic lives in `packages/fairness/src/perBallDecomposer.ts`.
 
-| Delivery outcome | Display bump | Effect |
-|-----------------|-------------|--------|
-| Dot (0 runs) | +0.04 | Small increase — survived a ball |
-| 1 run | +0.12 | Moderate increase |
-| 2 runs | +0.22 | Good increase |
-| 4 runs (boundary) | +0.55 | Strong increase |
-| 6 runs (six) | +1.10 | Dramatic increase |
-| Wicket | Display → 0 | Bet lost |
+### 3.1 Outcome table (standard mode)
 
-Starting display multiplier: 1.00. Cashout payout = `floor(betAmount × displayMultiplier)`.
+| Outcome | Multiplier | Probability |
+|---------|------------|-------------|
+| Six | 2.00x | 5% |
+| Four | 1.75x | 7% |
+| Triple | 1.36x | 9% |
+| Double | 1.16x | 13% |
+| Single | 1.08x | 15% |
+| Dot Ball | 0.90x | 20% |
+| Good Fielding | 0.70x | 16% |
+| Catch Out | 0x | 15% |
 
-**Run distribution (all modes):**
+Analytical RTP (`Σ probability × multiplier`) is maintained inside a 94%–96% target band by CI invariants.
 
-| Outcome | Probability (of non-wicket outcomes) |
-|---------|-------------------------------------|
-| 0 runs | 38% |
-| 1 run | 28% |
-| 2 runs | 18% |
-| 4 runs | 12% |
-| 6 runs | 4% |
+### 3.2 Sky override model
 
-**Wicket probability:** Base 15%. +5% after 2 consecutive dots. +8% after a boundary. +3% for Spin bowler. Capped at 35%.
+- Standard sky chance: 2%
+- Bonus/Powerplay sky chance: 12%
+- Distribution: Jetpack 75%, Small Plane 22%, Big Plane 3%
+- Sky payouts are **override multipliers** (10x or 100x), not additive.
+
+### 3.3 Boundary streak model
+
+Consecutive boundaries (4/6) apply overrides:
+
+- 3 boundaries: 3x
+- 4 boundaries: 4x
+- 5 boundaries: 5x
+- 6 boundaries: 8x
+
+### 3.4 Stake-native decomposition invariant
+
+For Stake mode, one RGS `payoutMultiplier` is decomposed into per-ball factors deterministically (`decomposeRound`) for presentation pacing. The product of per-ball factors is reconciled to the Stake target with bounded epsilon and telemetry.
+
+Settlement remains Stake-authoritative.
 
 ---
 
@@ -139,9 +153,10 @@ Starting display multiplier: 1.00. Cashout payout = `floor(betAmount × displayM
 - Clear distinct states: "bet open", "bet locked", "cashout live", "round ended".
 - Cashout button only interactive when server will accept it (no false-positive hot states).
 - Distinct feedback for: win, loss, wicket, and rejected actions.
-- Balance updated immediately after every transaction.
+- Balance updated immediately after every transaction (displayed in bottom bar next to currency).
 - Mode label always visible (Local / Live / Stake).
 - Controls positioned below arena viewport on all screen sizes.
+- Primary arena/WebGL viewport is **full bleed to the top** (no fixed header strip obscuring sky); wallet balance and mute remain accessible in the lower chrome.
 
 ---
 

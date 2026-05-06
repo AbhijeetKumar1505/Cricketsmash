@@ -16,6 +16,8 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['stake-engine'],
+    /** Fewer parallel esbuild transforms on first crawl (helps flaky Windows esbuild subprocess). */
+    holdUntilCrawlEnd: true,
   },
   build: {
     /** Static output for Stake Engine upload */

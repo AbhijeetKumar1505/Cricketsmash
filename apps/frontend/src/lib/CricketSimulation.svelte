@@ -13,7 +13,9 @@
     host.appendChild(canvas);
 
     const rect = host.getBoundingClientRect();
-    engineBridge = new EngineBridge(canvas, rect.width || 720, rect.height || 400);
+    const params = new URLSearchParams(window.location.search);
+    const debug = params.get('debug') === '1';
+    engineBridge = new EngineBridge(canvas, rect.width || 720, rect.height || 400, { debug });
 
     // Wire engine events → game controller reactive state
     bindBridge(engineBridge);

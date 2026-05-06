@@ -1,5 +1,5 @@
 # Cricket Crash — Refactor Roadmap (v2 — Audit-Aligned)
-*Last updated: 2026-04-02*
+*Last updated: 2026-05-02*
 
 ## Phase 1 — Critical Fixes (production blocker)
 
@@ -35,7 +35,7 @@
 24. Add WS loading/connecting state with spinner (`App.svelte`).
 25. Replace synthetic `speedKmh = Math.random()` with deterministic bowler-type seeding (`App.svelte`).
 26. Add `WALLET_UPDATE` balance display feedback after loss (wicket).
-27. Remove `CricketStage.svelte` duplicate; unify into `CricketSimulation.svelte`.
+27. **Pixi cleanup:** `CricketSimulation.svelte` is the active 3D host (`EngineBridge` → `GameEngine` + `Renderer`). Remove or archive legacy `CricketStage.svelte` (Pixi) if still unused.
 
 ## Phase 4 — Performance and Polish
 

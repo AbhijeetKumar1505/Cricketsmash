@@ -15,15 +15,48 @@ import { GameEngine }    from '../engine/GameEngine.js';
 import { Renderer }      from '../render/Renderer.js';
 import { GameLoop }      from '../engine/loop/GameLoop.js';
 import { OutcomeSystem } from '../engine/rng/OutcomeSystem.js';
-import type { DeliveryOutcome } from '../engine/rng/OutcomeSystem.js';
-import type { HitQuality, RoundOutcome } from '../engine/events/EventBus.js';
+import type { DeliveryOutcome, OutcomeBucket } from '../engine/rng/OutcomeSystem.js';
+import type { HitQuality, RoundOutcome, BonusZone, BonusType, BonusRarityTier } from '../engine/events/EventBus.js';
+import type { SkyObjectMeta, SkyObjectType } from '../engine/sky/types.js';
 
 // ── Callback types ────────────────────────────────────────────────────────────
 
 export interface BridgeCallbacks {
-  onHitResult:       (quality: HitQuality)  => void;
+  onHitResult:       (quality: HitQuality, bucket: OutcomeBucket)  => void;
   onMultiplier:      (value: number)        => void;
   onRoundEnd:        (multiplier: number, outcome: RoundOutcome) => void;
+  onBonusSpawned?:   (payload: {
+    sourceId: string;
+    type: BonusType;
+    zone: BonusZone;
+    rarityTier: BonusRarityTier;
+    worldPos: { x: number; y: number; z: number };
+  }) => void;
+  onBonusHit?:       (payload: {
+    sourceId: string;
+    type: BonusType;
+    zone: BonusZone;
+    rarityTier: BonusRarityTier;
+    worldPos: { x: number; y: number; z: number };
+  }) => void;
+  onBonusAwarded?:   (payload: {
+    extraBalls: number;
+    profitMult: number;
+    sourceId: string;
+    type: BonusType;
+    zone: BonusZone;
+    rarityTier: BonusRarityTier;
+    worldPos: { x: number; y: number; z: number };
+  }) => void;
+  onSkyObjectSpawned?: (payload: {
+    type: SkyObjectType;
+    worldPos: { x: number; y: number; z: number };
+  }) => void;
+  onSkyObjectHit?: (payload: {
+    type: SkyObjectType;
+    multiplier: 10 | 100;
+    worldPos: { x: number; y: number; z: number };
+  }) => void;
   onStateChange?:    (from: string, to: string) => void;
   onBowlStart?:      (bowlerType: string, hitTime: number) => void;
 }
@@ -42,9 +75,14 @@ export class EngineBridge {
   /** Unsubscribe callbacks from engine events. Collected on init. */
   private readonly _unsubs: Array<() => void> = [];
 
-  constructor(canvas: HTMLCanvasElement, width: number, height: number) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    width: number,
+    height: number,
+    options: { debug?: boolean } = {},
+  ) {
     this.engine   = new GameEngine();
-    this.renderer = new Renderer(canvas, width, height);
+    this.renderer = new Renderer(canvas, width, height, options);
     this.outcomes = new OutcomeSystem();
 
     // The loop is the single rAF: engine.update → renderer.render
@@ -84,8 +122,8 @@ export class EngineBridge {
    */
   setCallbacks(cb: BridgeCallbacks): void {
     this._unsubs.push(
-      this.engine.events.on('hit', ({ quality }) => {
-        cb.onHitResult(quality);
+      this.engine.events.on('hit', ({ quality, bucket }) => {
+        cb.onHitResult(quality, bucket);
       }),
       this.engine.events.on('multiplier', ({ value }) => {
         cb.onMultiplier(value);
@@ -94,6 +132,20 @@ export class EngineBridge {
         cb.onRoundEnd(multiplier, outcome);
       }),
     );
+
+    if (cb.onBonusAwarded) {
+      this._unsubs.push(
+        this.engine.events.on('bonusAwarded', ({ extraBalls, profitMult, sourceId, zone, type, rarityTier, worldPos }) => {
+          cb.onBonusAwarded!({ extraBalls, profitMult, sourceId, zone, type, rarityTier, worldPos });
+        }),
+      );
+    }
+    if (cb.onBonusSpawned) {
+      this._unsubs.push(this.engine.events.on('bonusSpawned', (payload) => cb.onBonusSpawned!(payload)));
+    }
+    if (cb.onBonusHit) {
+      this._unsubs.push(this.engine.events.on('bonusHit', (payload) => cb.onBonusHit!(payload)));
+    }
 
     if (cb.onStateChange) {
       this._unsubs.push(
@@ -107,6 +159,21 @@ export class EngineBridge {
       this._unsubs.push(
         this.engine.events.on('bowlStart', ({ bowlerType, hitTime }) => {
           cb.onBowlStart!(bowlerType, hitTime);
+        }),
+      );
+    }
+
+    if (cb.onSkyObjectSpawned) {
+      this._unsubs.push(
+        this.engine.events.on('skyObjectSpawned', (payload) => {
+          cb.onSkyObjectSpawned!(payload);
+        }),
+      );
+    }
+    if (cb.onSkyObjectHit) {
+      this._unsubs.push(
+        this.engine.events.on('skyObjectHit', (payload) => {
+          cb.onSkyObjectHit!(payload);
         }),
       );
     }
@@ -154,7 +221,9 @@ export class EngineBridge {
     result:          'hit' | 'wicket',
     bowlerType:      'fast' | 'spin' | 'swing',
     targetMultiplier: number,
+    bucket?: OutcomeBucket,
+    skyObject?: SkyObjectMeta | null,
   ): DeliveryOutcome {
-    return this.outcomes.fromServer(result, bowlerType, targetMultiplier);
+    return this.outcomes.fromServer(result, bowlerType, targetMultiplier, bucket, skyObject);
   }
 }

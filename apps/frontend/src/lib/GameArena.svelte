@@ -7,6 +7,7 @@
   import ScorecardOverlay from "./ui/ScorecardOverlay.svelte";
 
   import type { DeliveryOutcome } from "../core/gameController.svelte.js";
+  import type { SkyObjectType } from "../engine/sky/types.js";
 
   type ArenaBroadcastStatus =
     | "waiting"
@@ -24,6 +25,12 @@
     commentaryText = "",
     commentaryKey = 0,
     streak = 0,
+    rewardToast = null as null | { text: string; color: string; key: number },
+    skyHitToast = null as null | {
+      type: SkyObjectType;
+      multiplier: number;
+      key: number;
+    },
     scorecardData = null as null | {
       history: DeliveryOutcome[];
       multiplier: number;
@@ -44,6 +51,12 @@
     commentaryText?: string;
     commentaryKey?: number;
     streak?: number;
+    rewardToast?: null | { text: string; color: string; key: number };
+    skyHitToast?: null | {
+      type: SkyObjectType;
+      multiplier: number;
+      key: number;
+    };
     scorecardData?: null | {
       history: DeliveryOutcome[];
       multiplier: number;
@@ -268,11 +281,11 @@
 
   <!-- ─── CRT Scanlines ─── -->
   <div
-    class="absolute inset-0 z-[26] crt-overlay opacity-[0.035] pointer-events-none"
+    class="absolute inset-0 z-[26] crt-overlay opacity-[0.02] pointer-events-none"
   ></div>
 
   <!-- ─── PERMANENT BROADCAST OVERLAYS (Svelte Layer) ─── -->
-  {#if !scorecardData}
+  {#if !scorecardData && arenaStatus === "waiting"}
     <div class="broadcast-overlay absolute inset-0 z-[50] pointer-events-none">
       <!-- Blue: badgelogo3D — top-left holographic badge -->
       <img src="/badgelogo3D_t.png" alt="Badge" class="bo-badge" />
@@ -313,7 +326,7 @@
       {#if arenaStatus === "waiting"}
         <div class="flex flex-col items-center gap-4">
           <div
-            class="px-6 py-3 glass-panel rounded-2xl border border-white/10 animate-pulse"
+            class="px-6 py-3 glass-panel waiting-chip rounded-2xl border border-white/10 animate-pulse"
           >
             <span
               class="text-xs font-label font-black text-on-surface-variant/40 uppercase tracking-[0.4em]"
@@ -351,7 +364,23 @@
        (result stage 2), so the UX order is: bowl → hit → timeline → multiplier. -->
   {#if !scorecardData && !isCrashed && arenaStatus === "result" && resultStage === 2}
     <div class="mult-center-anchor">
-      <MultiplierDisplay value={accumulatedMult} status="hitting" />
+      <MultiplierDisplay value={accumulatedMult} status="hitting" pulseKey={rewardToast?.key ?? 0} />
+    </div>
+  {/if}
+
+  {#if rewardToast}
+    <div class="bonus-toast" style="--bonus-color: {rewardToast.color}">
+      {rewardToast.text}
+    </div>
+  {/if}
+
+  {#if skyHitToast}
+    <div
+      class="bonus-toast sky-toast"
+      class:sky-toast--big={skyHitToast.multiplier >= 100}
+      style={`--bonus-color: ${skyHitToast.type === "JETPACK" ? "#ffd84e" : skyHitToast.type === "SMALL_PLANE" ? "#58d6ff" : "#ff4fd8"}`}
+    >
+      +{skyHitToast.multiplier}x
     </div>
   {/if}
 
@@ -422,20 +451,20 @@
   }
   .arena-fog-bottom {
     bottom: 0;
-    height: 24%;
+    height: 18%;
     background: linear-gradient(
       to top,
-      rgba(0, 0, 0, 0.22) 0%,
+      rgba(0, 0, 0, 0.14) 0%,
       transparent 100%
     );
     animation-delay: 0s;
   }
   .arena-fog-top {
     top: 0;
-    height: 18%;
+    height: 12%;
     background: linear-gradient(
       to bottom,
-      rgba(255, 255, 255, 0.08) 0%,
+      rgba(255, 255, 255, 0.04) 0%,
       transparent 100%
     );
     animation-delay: 3.5s;
@@ -495,11 +524,12 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     padding: 0.7rem 1.8rem;
-    background: rgba(0, 0, 0, 0.55);
+    background: rgba(2, 5, 12, 0.76);
     border-radius: 1rem;
     border: 1px solid;
     backdrop-filter: blur(12px);
     line-height: 1.1;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
 
   .bc-streak {
@@ -579,6 +609,7 @@
   /* ── Broadcast Overlays ── */
   .broadcast-overlay {
     transition: opacity 0.6s ease;
+    opacity: 0.78;
   }
 
   /* Blue: badgelogo3D — left panel, flanking the banner */
@@ -586,26 +617,26 @@
     position: absolute;
     top: 0;
     left: 0;
-    width: 25%;
-    max-width: 280px;
+    width: 18%;
+    max-width: 210px;
     height: auto;
     object-fit: contain;
     animation: broadcast-float 4s ease-in-out infinite;
-    filter: drop-shadow(0 0 20px rgba(255, 180, 0, 0.6));
+    filter: drop-shadow(0 0 12px rgba(255, 180, 0, 0.45));
   }
 
   /* Black: logo — centered brand mark over the banner area */
   .bo-logo {
     position: absolute;
-    top: 28px;
-    left: 43%;
+    top: 22px;
+    left: 50%;
     transform: translateX(-50%);
-    width: 200px;
+    width: 180px;
     height: auto;
     object-fit: contain;
     mix-blend-mode: screen;
     animation: broadcast-float 4s ease-in-out infinite;
-    filter: drop-shadow(0 0 14px rgba(255, 210, 0, 0.5));
+    filter: drop-shadow(0 0 10px rgba(255, 210, 0, 0.35));
     z-index: 1;
   }
 
@@ -614,12 +645,17 @@
     position: absolute;
     top: 0;
     right: 0;
-    width: 25%;
-    max-width: 280px;
+    width: 18%;
+    max-width: 210px;
     height: auto;
     object-fit: contain;
     animation: broadcast-float 4s ease-in-out infinite;
-    filter: drop-shadow(0 0 20px rgba(255, 180, 0, 0.5));
+    filter: drop-shadow(0 0 12px rgba(255, 180, 0, 0.4));
+  }
+
+  .waiting-chip {
+    background: rgba(4, 10, 20, 0.7);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
   }
 
   @keyframes broadcast-float {
@@ -652,16 +688,54 @@
     white-space: nowrap;
   }
 
+  .bonus-toast {
+    position: absolute;
+    left: 50%;
+    top: 34%;
+    transform: translateX(-50%);
+    z-index: 66;
+    padding: 0.55rem 1rem;
+    border-radius: 999px;
+    font-size: 1.1rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    color: #fff;
+    border: 1px solid color-mix(in srgb, var(--bonus-color, #ffda6f), #fff 35%);
+    background: color-mix(in srgb, var(--bonus-color, #ffda6f), #000 60%);
+    box-shadow: 0 0 28px color-mix(in srgb, var(--bonus-color, #ffda6f), transparent 35%);
+    animation: bonus-toast-pop 0.9s ease-out forwards;
+    pointer-events: none;
+  }
+
+  @keyframes bonus-toast-pop {
+    0% { opacity: 0; transform: translateX(-50%) translateY(18px) scale(0.85); }
+    15% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.03); }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-18px) scale(1); }
+  }
+
+  .sky-toast.sky-toast--big {
+    font-size: 1.45rem;
+    top: 28%;
+    letter-spacing: 0.12em;
+  }
+
   @media (max-width: 768px) {
+    .broadcast-overlay {
+      opacity: 0.66;
+    }
     .bo-badge {
-      width: 20%;
+      display: none;
     }
     .bo-logo {
-      width: 160px;
-      top: 48px;
+      width: 132px;
+      top: 12px;
     }
     .bo-cc {
-      width: 20%;
+      display: none;
+    }
+    .bc-outcome {
+      font-size: 1.6rem;
+      padding: 0.55rem 1.2rem;
     }
   }
 </style>

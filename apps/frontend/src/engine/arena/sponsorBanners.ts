@@ -49,6 +49,9 @@ const EVENT_ADS: Record<string, ContextualAd[]> = {
   ],
 };
 
+/** TS DOM types may lag Canvas 2D `letterSpacing` (supported in browsers). */
+type Canvas2DTextLayout = CanvasRenderingContext2D & { letterSpacing?: string };
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const PANEL_COUNT = 14; 
@@ -94,7 +97,7 @@ function drawBrandPanel(ctx: CanvasRenderingContext2D, brand: SponsorBrand, puls
   ctx.font = '900 110px "Orbitron", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.letterSpacing = '8px';
+  (ctx as Canvas2DTextLayout).letterSpacing = '8px';
   ctx.fillText(brand.name, W / 2, H * 0.46);
   ctx.restore();
 
@@ -104,7 +107,7 @@ function drawBrandPanel(ctx: CanvasRenderingContext2D, brand: SponsorBrand, puls
   ctx.font = '700 28px "Orbitron", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.letterSpacing = '12px';
+  (ctx as Canvas2DTextLayout).letterSpacing = '12px';
   ctx.globalAlpha = 0.8;
   ctx.fillText(brand.tagline, W / 2, H * 0.84);
   ctx.restore();
@@ -114,6 +117,20 @@ function drawBrandPanel(ctx: CanvasRenderingContext2D, brand: SponsorBrand, puls
   for (let y = 0; y < H; y += 4) {
     ctx.fillRect(0, y, W, 2);
   }
+}
+
+/** Readable parody hoarding texture for miniature bonus banners (matches stadium ribbon art). */
+export function createBonusMiniBannerTexture(brandVariant: number): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = TEX_W;
+  canvas.height = TEX_H;
+  const ctx = canvas.getContext('2d')!;
+  const brand = BRANDS[Math.abs(brandVariant) % BRANDS.length]!;
+  drawBrandPanel(ctx, brand, brandVariant * 0.13);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }
 
 function drawEventFlash(ctx: CanvasRenderingContext2D, ad: ContextualAd, flash: number) {

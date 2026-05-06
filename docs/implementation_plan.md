@@ -12,8 +12,8 @@ Turn the empty upper bowl into a **living, monetizable stadium layer** with spon
 > [!IMPORTANT]
 > **Performance Budget**: The current scene already runs 4000 instanced spectator sprites + post-processing bloom. The plan uses **instanced meshes**, **batched updates**, and **billboard sprites** to add ~2000 more crowd entities + banner system at negligible GPU cost. Target: maintain 60 FPS.
 
-> [!WARNING]
-> **ArenaScene vs CricketWebGLEngine**: The codebase has **two** render orchestrators — `CricketWebGLEngine.ts` (the active one used by `CricketSimulation.svelte → ArenaScene.ts`) and the legacy `CricketWebGLEngine.ts` (also active, used for shot labels/POV). The `CricketSimulation.svelte` mounts `ArenaScene`, so all new systems will be wired into `ArenaScene` which is the active pipeline. `CricketWebGLEngine` also independently mounts spectators — I will **not** duplicate work there.
+> [!NOTE]
+> **Current WebGL orchestration**: `CricketSimulation.svelte` → **`EngineBridge`** → **`GameEngine`** + **`Renderer`** (`GameLoop` owns rAF). Stadium/crowd/sponsor layers compose through **`render/entities/Stadium.ts`** and **`engine/arena/*`**. Legacy **`ArenaScene.ts`**, **`CricketWebGLEngine.ts`**, and **`CrowdSystem.ts`** are **removed** — mount new stadium features onto **`Stadium.ts`** / arena modules rather than resurrecting duplicate orchestrators.
 
 ---
 
@@ -21,9 +21,9 @@ Turn the empty upper bowl into a **living, monetizable stadium layer** with spon
 
 ```mermaid
 graph TD
-    A["ArenaScene (orchestrator)"] --> B["SponsorBannerSystem"]
-    A --> C["CrowdSystem (enhanced)"]
-    A --> D["StadiumActivitySystem"]
+    A["Stadium.ts + GameLoop"] --> B["Sponsor banners (arena/)"]
+    A --> C["Spectators / crowd tiers (spectators.ts)"]
+    A --> D["Stadium activities (stadiumActivities.ts)"]
     
     B --> B1["LED Ribbon Ring (Layer A)"]
     B --> B2["Contextual Ad Reactions"]
@@ -133,9 +133,9 @@ onGameEvent(event) → temporarily override visible banner text:
 | Idle | Slow sway | Very slow drift | Near static |
 | Celebrate | Mexican wave cascade | Follow wave | Flash ripple |
 
-#### [MODIFY] [CrowdSystem.ts](file:///f:/Cricketsmash/apps/frontend/src/engine/CrowdSystem.ts)
+#### Wire crowd reactions
 
-Wire the enhanced spectator system reactions to game events. Add `triggerEvent(type)` method that maps `EngineProps` phase transitions to crowd reactions.
+Hook enhanced spectator tiers to **`EngineSnapshot` / phase** from `GameEngine` (via `Renderer` or `StadiumEntity.updateAnimations`) — **`CrowdSystem.ts` no longer exists**; consolidate event reactions in spectators + stadium facade code without a second orchestrator.
 
 ---
 
@@ -159,13 +159,13 @@ Micro-activities that make the stands feel alive:
 
 ### Integration Layer
 
-#### [MODIFY] [ArenaScene.ts](file:///f:/Cricketsmash/apps/frontend/src/engine/ArenaScene.ts)
+#### [MODIFY] [Stadium.ts](file:///f:/Cricketsmash/apps/frontend/src/render/entities/Stadium.ts)
 
-- Import and mount `SponsorBannerSystem` and `StadiumActivitySystem`
+- Import and mount / update sponsor ribbons, spectator systems, and `StadiumActivitySystem` (per existing module split under `engine/arena/`)
 - Wire phase transitions → sponsor event reactions
-- Wire phase transitions → crowd event triggers  
+- Wire phase transitions → crowd event triggers
 - Wire phase transitions → activity triggers (confetti, wave, spotlight)
-- Update all systems in render loop
+- Ensure updates run from **`Renderer`** / **`StadiumEntity`** each frame — **do not add a parallel scene root outside this path**
 
 #### [MODIFY] [stadiumStructure.ts](file:///f:/Cricketsmash/apps/frontend/src/engine/arena/stadiumStructure.ts)
 
@@ -181,8 +181,8 @@ Micro-activities that make the stands feel alive:
 | `arena/sponsorBanners.ts` | NEW | LED ribbon sponsor system with 20+ brands, contextual reactions |
 | `arena/spectators.ts` | REWRITE | Three-tier crowd with event reactions, color variety, height variation |
 | `arena/stadiumActivities.ts` | NEW | Flash photography, flags, confetti, Mexican wave, spotlights |
-| `CrowdSystem.ts` | MODIFY | Wire event-driven reactions from game state |
-| `ArenaScene.ts` | MODIFY | Mount + update all new systems |
+| `spectators.ts` + `Stadium.ts` | MODIFY | Wire event-driven reactions from snapshot / phases |
+| `render/entities/Stadium.ts` | MODIFY | Mount + update all living-stadium systems |
 | `stadiumStructure.ts` | MODIFY | Remove old ad boards, adjust tier aesthetics |
 
 ---

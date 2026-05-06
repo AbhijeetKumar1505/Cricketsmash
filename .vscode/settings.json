@@ -2,5 +2,7 @@
   "css.lint.unknownAtRules": "ignore",
   "tailwindCSS.includeLanguages": {
     "svelte": "svelte"
-  }
+  },
+  "shader-validator.glsl.targetClient": "OpenGL450",
+  "shader-validator.glsl.enabled": false
 }

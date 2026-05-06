@@ -2,12 +2,16 @@ import type { EventBus } from '../events/EventBus.js';
 
 // ── Phase enum ────────────────────────────────────────────────────────────────
 
-export type GamePhase =
-  | 'idle'        // waiting for next delivery command
-  | 'bowling'     // ball in flight, pre-hit trajectory
-  | 'hit_window'  // ball at batsman — swing input valid
-  | 'post_hit'    // ball struck — physics running
-  | 'result';     // showing outcome before returning to idle
+export enum GameState {
+  IDLE = 'IDLE',
+  BETTING = 'BETTING',
+  BOWLER_RUNUP = 'BOWLER_RUNUP',
+  BALL_RELEASE = 'BALL_RELEASE',
+  BALL_TRAVEL = 'BALL_TRAVEL',
+  HIT = 'HIT',
+  BALL_RESULT = 'BALL_RESULT',
+  RESET = 'RESET',
+}
 
 // ── Transition table ──────────────────────────────────────────────────────────
 //
@@ -19,36 +23,39 @@ export type GamePhase =
 //   post_hit → result     (ball settled / over boundary)
 //   result → idle         (UI done showing result)
 
-const EDGES: Partial<Record<GamePhase, readonly GamePhase[]>> = {
-  idle:       ['bowling'],
-  bowling:    ['hit_window'],
-  hit_window: ['post_hit', 'result'],
-  post_hit:   ['result'],
-  result:     ['idle'],
+const EDGES: Partial<Record<GameState, readonly GameState[]>> = {
+  [GameState.IDLE]: [GameState.BETTING],
+  [GameState.BETTING]: [GameState.BOWLER_RUNUP],
+  [GameState.BOWLER_RUNUP]: [GameState.BALL_RELEASE],
+  [GameState.BALL_RELEASE]: [GameState.BALL_TRAVEL],
+  [GameState.BALL_TRAVEL]: [GameState.HIT],
+  [GameState.HIT]: [GameState.BALL_RESULT],
+  [GameState.BALL_RESULT]: [GameState.RESET],
+  [GameState.RESET]: [GameState.IDLE],
 };
 
 // ── StateMachine ──────────────────────────────────────────────────────────────
 
 export class StateMachine {
-  private _phase: GamePhase = 'idle';
+  private _phase: GameState = GameState.IDLE;
 
   /** Elapsed time inside the current phase (seconds). */
   private _phaseTime = 0;
 
   constructor(private readonly bus: EventBus) {}
 
-  get phase(): GamePhase { return this._phase; }
+  get phase(): GameState { return this._phase; }
 
   /** Elapsed seconds since the last phase transition. */
   get phaseTime(): number { return this._phaseTime; }
 
-  is(phase: GamePhase): boolean { return this._phase === phase; }
+  is(phase: GameState): boolean { return this._phase === phase; }
 
   /**
    * Attempt a transition. Returns true if successful, false if the edge is
    * not in the transition table (caller decides whether to warn/throw).
    */
-  transition(to: GamePhase): boolean {
+  transition(to: GameState): boolean {
     if (!EDGES[this._phase]?.includes(to)) {
       // Vite sets DEV; guarded to avoid TS errors in non-Vite contexts
       try { if ((import.meta as any).env?.DEV) console.warn(`[StateMachine] Invalid: ${this._phase} → ${to}`); } catch { /**/ }
@@ -67,7 +74,7 @@ export class StateMachine {
   }
 
   reset(): void {
-    this._phase = 'idle';
+    this._phase = GameState.IDLE;
     this._phaseTime = 0;
   }
 }

@@ -26,7 +26,7 @@ export interface CharacterAnimState {
   /** Normalised run-up progress 0→1 (bowler only). */
   runT: number;
 
-  /** Idle breathing phase (grows with time, drives vertical oscillation). */
+  /** Idle phase accumulator (optional sway / secondary motion; not vertical hop). */
   breathPhase: number;
 }
 

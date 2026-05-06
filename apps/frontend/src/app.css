@@ -289,6 +289,11 @@
   body {
     @apply bg-surface text-on-surface font-body overflow-hidden selection:bg-primary/30 selection:text-white;
   }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-neon-green) 72%, white);
+    outline-offset: 2px;
+  }
 }
 
 @layer components {
@@ -672,4 +677,22 @@
 @keyframes bet-plaque-shine {
   from { transform: translateX(0) rotate(18deg); }
   to   { transform: translateX(260%) rotate(18deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .arena-particle,
+  .page-particle,
+  .crt-overlay,
+  .noise-overlay {
+    display: none !important;
+  }
 }

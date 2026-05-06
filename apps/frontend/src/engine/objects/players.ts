@@ -2,10 +2,39 @@ import * as THREE from 'three';
 import { SIM } from '../layout.js';
 import { screenGroundPoint } from '../worldMapping.js';
 
-/** 
+/**
  * Google Doodle Style Characters.
  * Simple primitives, expressive features, and easy to animate with Squash & Stretch.
  */
+
+const OUTLINE_SCALE = 1.055;
+const PLAYER_MIN_Y = 0;
+
+/** Shared backface outline material (one draw style for all player outlines). */
+const outlineMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
+
+function stdMat(
+  color: THREE.ColorRepresentation,
+  opts?: { emissive?: THREE.ColorRepresentation; emissiveIntensity?: number; roughness?: number },
+): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: opts?.roughness ?? 0.82,
+    metalness: 0,
+    emissive: opts?.emissive ?? 0x000000,
+    emissiveIntensity: opts?.emissiveIntensity ?? 0.08,
+  });
+}
+
+/** Add a slightly larger backface duplicate before the source mesh (drawn behind). */
+function addOutlinedMesh(parent: THREE.Object3D, mesh: THREE.Mesh, scale = OUTLINE_SCALE): void {
+  const outline = new THREE.Mesh(mesh.geometry, outlineMat);
+  outline.scale.setScalar(scale);
+  outline.position.copy(mesh.position);
+  outline.rotation.copy(mesh.rotation);
+  parent.add(outline);
+  parent.add(mesh);
+}
 
 function createBlobShadow(radius: number = 0.5): THREE.Mesh {
   const geo = new THREE.CircleGeometry(radius, 24);
@@ -16,155 +45,239 @@ function createBlobShadow(radius: number = 0.5): THREE.Mesh {
   return mesh;
 }
 
-export function createBowlerFigure(_kitColor: number): THREE.Group {
-  const g = new THREE.Group();
-  g.add(createBlobShadow(0.4));
+type BaseFigure = {
+  root: THREE.Group;
+  scalePivot: THREE.Group;
+  bodyRoot: THREE.Group;
+  torso: THREE.Group;
+  headGroup: THREE.Group;
+  eyePivots: THREE.Group;
+  rArmPivot: THREE.Group;
+  lArmPivot: THREE.Group;
+  rElbow: THREE.Group;
+  rWrist: THREE.Group;
+  rLegPivot: THREE.Group;
+  lLegPivot: THREE.Group;
+};
 
-  const mat = new THREE.MeshPhongMaterial({ color: 0x4ade80 }); // Vibrant cricket green
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+function createBaseFigure(color: number): BaseFigure {
+  const root = new THREE.Group();
+  const scalePivot = new THREE.Group();
+  const bodyRoot = new THREE.Group();
+  root.add(scalePivot);
+  scalePivot.add(bodyRoot);
+  const shadow = createBlobShadow(0.6);
+  shadow.scale.y = 0.5;
+  const shadowMat = shadow.material as THREE.MeshBasicMaterial;
+  shadowMat.opacity = 0.22;
+  root.add(shadow);
 
-  const bodyGroup = new THREE.Group();
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.7, 4, 8), mat);
-  torso.position.y = 0.45;
-  bodyGroup.add(torso);
-  g.add(bodyGroup);
+  const bodyMat = stdMat(color, { emissive: 0x102010, emissiveIntensity: 0.08 });
+  const limbMat = bodyMat;
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.45, metalness: 0 });
+  const antennaMat = new THREE.MeshLambertMaterial({ color: 0x2a6f3b });
+  const faceFeatureMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const handMat = stdMat(0xf2c59a, { roughness: 0.70, emissive: 0x221408, emissiveIntensity: 0.05 });
+
+  const torso = new THREE.Group();
+
+  const bodyGeo = new THREE.SphereGeometry(0.5, 20, 20);
+  bodyGeo.scale(1, 1.4, 0.85);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = 0.82;
+  addOutlinedMesh(torso, body);
+
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.2, 8), limbMat);
+  neck.position.y = 1.42;
+  addOutlinedMesh(torso, neck);
 
   const headGroup = new THREE.Group();
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 16), mat);
-  headGroup.add(head);
-  headGroup.position.y = 1.35;
-  g.add(headGroup);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), bodyMat);
+  head.position.y = 1.72;
+  addOutlinedMesh(headGroup, head);
+  headGroup.position.y = 0;
 
   const eyePivots = new THREE.Group();
+  eyePivots.position.set(0, 0, 0);
+  const eyeOffsetX = 0.11;
+  const eyeY = 1.82;
+  const eyeZ = 0.26;
   for (let i = -1; i <= 1; i += 2) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), eyeMat);
-    eye.position.set(i * 0.16, 0.05, 0.18);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), pupilMat);
-    pupil.position.set(i * 0.16, 0.05, 0.26);
-    eyePivots.add(eye, pupil);
+    const eyePivot = new THREE.Group();
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 12), eyeMat);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 10), pupilMat);
+    pupil.position.set(0, 0, 0.085);
+    eye.add(pupil);
+    eyePivot.add(eye);
+    eyePivot.position.set(i * eyeOffsetX, eyeY, eyeZ);
+    eyePivots.add(eyePivot);
   }
   headGroup.add(eyePivots);
 
-  const antMat = new THREE.MeshBasicMaterial({ color: 0x064e3b });
+  // Static doodle nose: tiny front-facing bump centered below eyes.
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 10), faceFeatureMat);
+  nose.position.set(0, 1.75, 0.295);
+  headGroup.add(nose);
+
+  // Static doodle smile: shallow lower-half arc, slightly forward to avoid z-fighting.
+  const smile = new THREE.Mesh(
+    new THREE.TorusGeometry(0.085, 0.008, 8, 20, Math.PI),
+    faceFeatureMat,
+  );
+  smile.position.set(0, 1.70, 0.293);
+  smile.rotation.z = Math.PI;
+  headGroup.add(smile);
+
   for (let i = -1; i <= 1; i += 2) {
-    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.5), antMat);
-    ant.position.set(i * 0.08, 0.28, 0.05);
-    ant.rotation.z = i * -0.4;
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 6), antennaMat);
+    ant.position.set(i * 0.07, 2.0, 0);
+    ant.rotation.z = i * 0.18;
     headGroup.add(ant);
   }
 
-  const rArmPivot = new THREE.Group();
-  rArmPivot.position.set(0.3, 1.1, 0);
-  const rArm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.8), mat);
-  rArm.position.y = -0.4;
-  rArmPivot.add(rArm);
-  g.add(rArmPivot);
+  torso.add(headGroup);
 
-  // Added pivots for leg animation
-  const rLegPivot = new THREE.Group();
-  rLegPivot.position.set(0.1, 0.35, 0);
-  const rLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.4, 4, 8), mat);
-  rLeg.position.y = -0.2;
-  rLegPivot.add(rLeg);
-  g.add(rLegPivot);
+  // shoulder → upper arm → elbow → lower arm → wrist → hand
+  function createArm() {
+    const pivot = new THREE.Group();
+
+    // Upper arm — slightly wider cylinder for readable silhouette.
+    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.42, 8), limbMat);
+    upper.position.y = -0.21;
+    addOutlinedMesh(pivot, upper);
+
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.42;
+
+    // Lower arm — tapers to wrist.
+    const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.044, 0.38, 8), limbMat);
+    lower.position.y = -0.20;
+    addOutlinedMesh(elbow, lower);
+
+    // Wrist — separate joint so bat (and hand sphere) can rotate independently.
+    // Children of wrist move when animated, keeping bat + hand in sync.
+    const wrist = new THREE.Group();
+    wrist.position.set(0, -0.39, 0);  // exactly at forearm bottom, no z-float
+
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 10, 10), handMat);
+    hand.scale.set(1.2, 0.94, 1.08);
+    hand.position.set(0, 0, 0);
+    addOutlinedMesh(wrist, hand);
+
+    elbow.add(wrist);
+    pivot.add(elbow);
+    return { pivot, elbow, wrist };
+  }
+
+  // Shoulder anchors: slightly narrower + a touch forward so hands read attached to torso.
+  const leftArmRig = createArm();
+  const lArmPivot = leftArmRig.pivot;
+  lArmPivot.position.set(-0.14, 1.50, 0.05);
+  lArmPivot.rotation.z = 0.28;
+  lArmPivot.rotation.x = -0.10;
+  leftArmRig.elbow.rotation.z = 0.06;
+
+  const rightArmRig = createArm();
+  const rArmPivot = rightArmRig.pivot;
+  rArmPivot.position.set(0.14, 1.50, 0.05);
+  rArmPivot.rotation.z = -0.28;
+  rArmPivot.rotation.x = -0.10;
+  rightArmRig.elbow.rotation.z = -0.06;
+
+  torso.add(lArmPivot, rArmPivot);
 
   const lLegPivot = new THREE.Group();
-  lLegPivot.position.set(-0.1, 0.35, 0);
-  const lLeg = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.4, 4, 8), mat);
-  lLeg.position.y = -0.2;
-  lLegPivot.add(lLeg);
-  g.add(lLegPivot);
+  lLegPivot.position.set(-0.18, 0.35, 0);
+  const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.6, 6), limbMat);
+  leftLeg.position.y = -0.3;
+  lLegPivot.add(leftLeg);
 
-  g.userData = { rArmPivot, torso: bodyGroup, headGroup, eyePivots, rLegPivot, lLegPivot };
-  return g;
+  const rLegPivot = new THREE.Group();
+  rLegPivot.position.set(0.18, 0.35, 0);
+  const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.6, 6), limbMat);
+  rightLeg.position.y = -0.3;
+  rLegPivot.add(rightLeg);
+  torso.add(lLegPivot, rLegPivot);
+
+  bodyRoot.add(torso);
+
+  return {
+    root, scalePivot, bodyRoot, torso, headGroup, eyePivots,
+    rArmPivot, lArmPivot,
+    rElbow: rightArmRig.elbow,
+    rWrist: rightArmRig.wrist,
+    rLegPivot, lLegPivot,
+  };
+}
+
+// Bat is parented to the right wrist so it follows wrist rotation exactly.
+function attachBat(base: BaseFigure): THREE.Group {
+  const batGroup = new THREE.Group();
+  batGroup.position.set(0, 0, 0);
+
+  const batMat = stdMat(0xd2a679, { emissive: 0x201308, emissiveIntensity: 0.04 });
+  // Blade in wrist/hand space; group rotation is driven by swing — mesh offset is ready stance.
+  const bat = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.05, 0.22), batMat);
+  bat.position.set(0, -0.25, 0.15);
+  bat.rotation.set(-0.5, 0.1, 0.2);
+  addOutlinedMesh(batGroup, bat);
+
+  base.rWrist.add(batGroup);
+  return batGroup;
+}
+
+export function createBowlerFigure(_kitColor: number): THREE.Group {
+  const base = createBaseFigure(0xe86a3d);
+  base.root.userData = {
+    scalePivot: base.scalePivot,
+    bodyRoot: base.bodyRoot,
+    rArmPivot: base.rArmPivot,
+    lArmPivot: base.lArmPivot,
+    torso: base.torso,
+    headGroup: base.headGroup,
+    eyePivots: base.eyePivots,
+    rLegPivot: base.rLegPivot,
+    lLegPivot: base.lLegPivot,
+    lockMinY: PLAYER_MIN_Y,
+  };
+  return base.root;
 }
 
 export function createBatsmanFigure(): THREE.Group {
-  const g = new THREE.Group();
-  g.add(createBlobShadow(0.6));
-
-  const bodyMat = new THREE.MeshPhongMaterial({ color: 0xffd93d }); // Specified Yellow
-  const beakMat = new THREE.MeshPhongMaterial({ color: 0xff8c42 }); // Specified Orange
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const pupilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
-
-  const bodyGroup = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 16), bodyMat);
-  body.scale.set(1.1, 0.9, 1); 
-  bodyGroup.add(body);
-  bodyGroup.position.y = 0.65;
-  g.add(bodyGroup);
-
-  const headGroup = new THREE.Group();
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 16), bodyMat);
-  headGroup.add(head);
-  headGroup.position.y = 1.3;
-  g.add(headGroup);
-
-  const beak = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.1, 0.35), beakMat);
-  beak.position.set(0, -0.05, 0.25);
-  headGroup.add(beak);
-
-  const eyePivots = new THREE.Group();
-  for (let i = -1; i <= 1; i += 2) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), eyeMat);
-    eye.position.set(i * 0.1, 0.1, 0.25);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 8), pupilMat);
-    pupil.position.set(i * 0.1, 0.1, 0.3);
-    eyePivots.add(eye, pupil);
-  }
-  headGroup.add(eyePivots);
-
-  const batGroup = new THREE.Group();
-  batGroup.position.set(0, 1.1, 0);
-  const bat = new THREE.Mesh(
-    new THREE.BoxGeometry(0.14, 1.3, 0.08),
-    new THREE.MeshPhongMaterial({ color: 0xc68642 }) // Specified Wood
-  );
-  bat.position.set(0.5, -0.5, 0.3);
-  bat.rotation.x = 0.5;
-  batGroup.add(bat);
-  g.add(batGroup);
-
-  g.userData = { armsGroup: batGroup, torso: bodyGroup, headGroup, eyePivots };
-  return g;
+  const base = createBaseFigure(0x2e7d32);
+  const batGroup = attachBat(base);
+  base.root.userData = {
+    scalePivot: base.scalePivot,
+    bodyRoot:   base.bodyRoot,
+    armsGroup:  batGroup,        // bat group in rWrist space; animator drives rotation
+    rArmPivot:  base.rArmPivot,  // whole right arm pivot (shoulder)
+    lArmPivot:  base.lArmPivot,  // whole left arm pivot (front/support)
+    rElbow:     base.rElbow,     // right elbow bend joint
+    rWrist:     base.rWrist,     // right wrist joint (drives hand + bat together)
+    torso:      base.torso,
+    headGroup:  base.headGroup,
+    eyePivots:  base.eyePivots,
+    lockMinY:   PLAYER_MIN_Y,
+  };
+  return base.root;
 }
 
-export function createFielderFigure(): THREE.Group {
-  const g = new THREE.Group();
-  g.add(createBlobShadow(0.4));
-
-  const bodyMat = new THREE.MeshPhongMaterial({ color: 0xfef3c7 }); 
-  const shellMat = new THREE.MeshPhongMaterial({ color: 0x92400e }); 
-
-  const bodyGroup = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 1.0, 4, 8), bodyMat);
-  body.rotation.z = Math.PI / 2;
-  bodyGroup.add(body);
-  bodyGroup.position.y = 0.15;
-  g.add(bodyGroup);
-
-  const shell = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.15, 12, 24), shellMat);
-  shell.rotation.y = Math.PI / 2;
-  shell.position.set(-0.2, 0.55, 0);
-  g.add(shell);
-
-  const eyePivots = new THREE.Group();
-  for (let i = -1; i <= 1; i += 2) {
-    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.4), bodyMat);
-    stalk.position.set(0.3, 0.3, i * 0.08);
-    stalk.rotation.z = -0.3;
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    eye.position.set(0.38, 0.48, i * 0.08);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 8), new THREE.MeshBasicMaterial({ color: 0x000000 }));
-    pupil.position.set(0.42, 0.48, i * 0.08);
-    eyePivots.add(stalk, eye, pupil);
-  }
-  g.add(eyePivots);
-
-  g.userData = { torso: bodyGroup, eyePivots, shell };
-  return g;
+export function createFielderFigure(_variant: number = 0): THREE.Group {
+  const base = createBaseFigure(0x2e7d32);
+  base.root.userData = {
+    scalePivot: base.scalePivot,
+    bodyRoot:   base.bodyRoot,
+    torso:      base.torso,
+    headGroup:  base.headGroup,
+    eyePivots:  base.eyePivots,
+    rArmPivot:  base.rArmPivot,
+    lArmPivot:  base.lArmPivot,
+    rLegPivot:  base.rLegPivot,
+    lLegPivot:  base.lLegPivot,
+    lockMinY:   PLAYER_MIN_Y,
+  };
+  return base.root;
 }
 
 export function placeBowler(group: THREE.Group, bowlerX: number) {
@@ -180,25 +293,11 @@ export function placeBatsman(group: THREE.Group) {
   group.position.z = p.z;
 }
 
-export function lookAtBall(fig: THREE.Group, ballPos: THREE.Vector3, isActive: boolean = true) {
-  const ud = fig.userData;
-  const localBall = fig.worldToLocal(ballPos.clone());
-  
-  if (ud.headGroup) {
-    const targetY = isActive ? THREE.MathUtils.clamp(localBall.x * 0.4, -0.6, 0.6) : 0;
-    const targetX = isActive ? THREE.MathUtils.clamp(-localBall.y * 0.3, -0.4, 0.4) : 0;
-    ud.headGroup.rotation.y = THREE.MathUtils.lerp(ud.headGroup.rotation.y, targetY, 0.1);
-    ud.headGroup.rotation.x = THREE.MathUtils.lerp(ud.headGroup.rotation.x, targetX, 0.1);
-  }
-
-  if (ud.eyePivots) {
-    if (isActive) {
-      const targetX = THREE.MathUtils.clamp(localBall.y * 0.6, -0.5, 0.5);
-      const targetY = THREE.MathUtils.clamp(localBall.x * 0.7, -0.8, 0.8);
-      ud.eyePivots.rotation.x = THREE.MathUtils.lerp(ud.eyePivots.rotation.x, -targetX, 0.2);
-      ud.eyePivots.rotation.y = THREE.MathUtils.lerp(ud.eyePivots.rotation.y, targetY, 0.2);
-    } else {
-      // Idle circle logic handled by animator or keep current
-    }
-  }
+export function applySquash(base: { scalePivot?: THREE.Group }, intensity: number): void {
+  if (!base.scalePivot) return;
+  const sp = base.scalePivot;
+  const s = 1 + intensity;
+  // sp.scale.x is the uniform depth scale written by Renderer this frame — preserve it.
+  const d = sp.scale.x;
+  sp.scale.set(d / s, d * s, d / s);
 }

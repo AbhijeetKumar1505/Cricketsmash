@@ -40,7 +40,9 @@ export class SpectatorSystem {
       this.imesh.setMatrixAt(i, this.dummy.matrix);
 
       // Random bright, flat cartoon colors
-      color.setHSL(Math.random(), 0.7 + Math.random() * 0.3, 0.4 + Math.random() * 0.4);
+      const section = Math.floor((angle / (Math.PI * 2)) * 6);
+      const baseHue = (section / 6 + 0.04 * Math.random()) % 1;
+      color.setHSL(baseHue, 0.62 + Math.random() * 0.24, 0.36 + Math.random() * 0.32);
       this.imesh.setColorAt(i, color);
 
       this.jumpOffsets[i] = Math.random() * Math.PI * 2;
@@ -73,7 +75,8 @@ export class SpectatorSystem {
       const baseY = this.basePositions[i * 3 + 1];
       const baseZ = this.basePositions[i * 3 + 2];
       
-      const yOffset = Math.abs(Math.sin(this.time * speed + this.jumpOffsets[i])) * jumpIntensity;
+      const bob = Math.sin(this.time * (speed * 0.33) + this.jumpOffsets[i]) * 0.1;
+      const yOffset = Math.abs(Math.sin(this.time * speed + this.jumpOffsets[i])) * jumpIntensity + bob;
       
       this.dummy.position.set(baseX, baseY + yOffset, baseZ);
       
