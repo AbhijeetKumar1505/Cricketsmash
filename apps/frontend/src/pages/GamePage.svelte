@@ -5,11 +5,13 @@
     cashout,
     returnToIdle,
     dismissMatchOverlay,
-    setBetAmount,
-    setGameMode,
+    setAutoPlay,
     getEffectiveTicketMultiplier,
+    swing,
     type VisualPhase,
+    type DeliveryOutcome,
   } from '../core/gameController.svelte.js';
+  import { navigationState } from '../core/navigation.svelte.js';
   import CricketSimulation from '../lib/CricketSimulation.svelte';
   import GameArena from '../lib/GameArena.svelte';
   import {
@@ -26,25 +28,86 @@
     updateTensionPitch,
     stopTensionHum,
   } from '../lib/gameAudio';
-  import BetPanel from '../lib/ui/BetPanel.svelte';
+  import BetPanel from '../lib/ui/bet/BetPanel.svelte';
+  import GameInfoPanel from '../lib/ui/GameInfoPanel.svelte';
+  import AutoplayConfirmDialog from '../lib/ui/AutoplayConfirmDialog.svelte';
+  import TopHUD from '../lib/ui/TopHUD.svelte';
+  import LeftPanel from '../lib/ui/LeftPanel.svelte';
+  import RightPanel from '../lib/ui/RightPanel.svelte';
+  import CharacterOverlay from '../lib/ui/overlays/CharacterOverlay.svelte';
+  import DifficultyOverlay from '../lib/ui/overlays/DifficultyOverlay.svelte';
+  import SettingsOverlay from '../lib/ui/overlays/SettingsOverlay.svelte';
 
+  function ballTickerSym(entry: DeliveryOutcome | null | undefined): string {
+    if (!entry) return '·';
+    if (entry.kind === 'wicket') return 'W';
+    return String(entry.runs);
+  }
 
+  const ballTicker = $derived.by(() => {
+    if (!game.overSummary.length) return '';
+    return game.overSummary.map(ballTickerSym).join(' · ');
+  });
 
-  let localBet = $state(game.betAmount || 10);
-  let autoCashoutVal = $state<number | null>(null);
-
-
-
-  // Sync local → controller only; game.betAmount is never changed externally
-  $effect(() => { setBetAmount(localBet); });
+  const showBallTicker = $derived(
+    game.sessionActive || game.phase === 'broadcast' || game.autoPlayOn,
+  );
 
   let mult = $derived(game.displayMultiplier * game.bonusProfitMultProduct);
   let soundOn = $state(true);
   let lastCashout = $state<string | null>(null);
   let pageEl = $state<HTMLElement | undefined>(undefined);
   let passedPageMilestones = new Set<number>();
+  let showInfoPanel = $state(false);
+  let showAutoplayConfirm = $state(false);
 
-  // ─── Streak: consecutive boundaries (4s/6s) in current over ───
+  // ─── Locale detection ───
+  const locale = $derived.by(() => {
+    const lang = navigator.language?.slice(0, 2) ?? 'en';
+    if (['en', 'es', 'pt', 'hi'].includes(lang)) return lang;
+    return 'en';
+  });
+
+  // ─── Spacebar → main action ───
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (showInfoPanel || showAutoplayConfirm) return;
+    // Close overlay on Escape
+    if (e.code === 'Escape' && navigationState.activeOverlay) {
+      navigationState.activeOverlay = null;
+      return;
+    }
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    if (e.code === 'Space') {
+      e.preventDefault();
+      if (game.visualPhase === 'bowl') {
+        swing();
+        return;
+      }
+      handleMainAction();
+    }
+  }
+
+  // ─── Autoplay confirmation flow ───
+  function requestAutoplay() {
+    if (game.autoPlayOn) {
+      setAutoPlay(false);
+    } else {
+      showAutoplayConfirm = true;
+    }
+  }
+
+  function confirmAutoplay() {
+    showAutoplayConfirm = false;
+    setAutoPlay(true);
+  }
+
+  function cancelAutoplay() {
+    showAutoplayConfirm = false;
+  }
+
+  // ─── Streak ───
   const streak = $derived.by(() => {
     let s = 0;
     const results = [...game.overSummary].reverse();
@@ -56,7 +119,7 @@
     return s;
   });
 
-  // ─── Commentary: phase + outcome → clean broadcast text ───
+  // ─── Commentary ───
   const commentaryKey = $derived(game.deliveryKey * 10 + game.currentBallIdx);
   const commentaryText = $derived.by(() => {
     const phase = game.visualPhase;
@@ -75,7 +138,7 @@
     return (['DOT BALL.', 'WELL DEFENDED!', 'TIGHT BOWLING!'] as const)[seed % 3]!;
   });
 
-  // ─── Scorecard: snapshot at broadcast phase for post-round summary ───
+  // ─── Scorecard ───
   const scorecardData = $derived.by(() => {
     if (game.phase !== 'broadcast') return null;
     const mult_val = game.lastSettledMultiplier > 0 ? game.lastSettledMultiplier : getEffectiveTicketMultiplier();
@@ -92,11 +155,11 @@
     };
   });
 
-  // ─── CSS var system: neon stadium color reactivity ───
+  // ─── CSS accent color reactivity ───
   const accentColor = $derived(
-    mult >= 10 ? '#ff00ff' : // Neon Magenta
-    mult >= 5  ? '#00ffff' : // Neon Cyan
-    mult >= 2  ? '#00ff88' : '#6366f1' // Indigo default
+    mult >= 10 ? '#ff00ff' :
+    mult >= 5  ? '#00ffff' :
+    mult >= 2  ? '#00ff88' : '#6366f1'
   );
   const accentRgb = $derived(
     mult >= 10 ? '255,0,255' :
@@ -126,14 +189,14 @@
   };
 
   const codeCrash = $derived(game.displayMultiplier <= 0 && game.sessionActive);
-  const canBet = $derived(!game.betActive && game.phase !== 'broadcast');
-  const isBetting = $derived(game.phase === 'betting');
+  const canBet = $derived(
+    !game.betActive && game.phase !== 'broadcast' && game.phase === 'idle',
+  );
   const isAnimating = $derived(game.sessionActive);
   const isBroadcast = $derived(game.phase === 'broadcast');
   const actionState = $derived.by(() => {
-    if (isBetting) return 'betting';
     if (game.betActive && game.canCashout) return 'cashout';
-    if (isAnimating) return isBetting ? 'betting' : 'bet';
+    if (isAnimating) return 'bet';
     if (isBroadcast) return 'waiting';
     return 'bet';
   });
@@ -143,7 +206,7 @@
     return game.betAmount * getEffectiveTicketMultiplier();
   });
 
-  // ─── React to visual phase changes for audio/events ───
+  // ─── Phase audio/events ───
   let lastTriggeredVPhase = $state<VisualPhase | 'idle'>('idle');
 
   $effect(() => {
@@ -178,131 +241,135 @@
     }
   });
 
-  function handleMainAction() {
+  async function handleMainAction() {
     sfx.click();
     if (canBet) {
-      placeBet();
-    } else if (game.betActive && game.canCashout) {
+      await placeBet();
+      return;
+    }
+    if (game.betActive && game.canCashout) {
       cashout();
     }
   }
 
-  // ─── Auto-proceed logic removed — handled by handleSessionEnd in controller ───
+  // ─── Mini-player viewport support ───
+  function handleResize() {
+    // reserved for future viewport-aware adjustments
+  }
 </script>
 
-<!-- ─── Page Shell ─── -->
+<svelte:window onkeydown={handleGlobalKeydown} onresize={handleResize} />
+
 <div
   class="page"
   class:crashed={codeCrash}
   bind:this={pageEl}
 >
-  <!-- ─── Broadcast Background ─── -->
+  <!-- Subtle scanline background -->
   <div class="page-bg" aria-hidden="true">
-    <div class="sky-gradient"></div>
-    <div class="sky-glow sky-glow-left"></div>
-    <div class="sky-glow sky-glow-right"></div>
-    <div class="sky-haze"></div>
     <div class="scanlines"></div>
     <div class="vignette"></div>
   </div>
 
-  <div class="art-overlay" aria-hidden="true">
-
-
-
-
-
+  <!-- ─── TopHUD row ─── -->
+  <div class="topbar-cell">
+    <TopHUD
+      bind:soundOn
+      onMuteToggle={() => { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); }}
+      multiplier={mult}
+      onInfo={() => { showInfoPanel = true; }}
+    />
   </div>
 
-  <!-- ─── Main Layout (full bleed to top — no top HUD strip) ─── -->
-  <div class="main-layout">
-    <main class="arena-container">
-      <GameArena
-        arenaStatus={isBroadcast ? 'over_ended' : (game.visualPhase === 'celebrate' ? 'result' : game.visualPhase === 'bowl' ? 'bowling' : game.visualPhase === 'hit' ? 'hitting' : game.visualPhase === 'wicket' ? 'wicket' : 'waiting')}
-        overHistory={game.overSummary}
-        currentBallIdx={game.currentBallIdx}
-        accumulatedMult={game.displayMultiplier * game.bonusProfitMultProduct}
-        {commentaryText}
-        {commentaryKey}
-        {streak}
-        rewardToast={game.pendingRewardToast}
-        skyHitToast={game.skyHitToast}
-        {scorecardData}
-        lossAmount={game.betAmount}
-        onRestart={returnToIdle}
-        onViewStats={dismissMatchOverlay}
-      >
-        <CricketSimulation />
-      </GameArena>
-
-      <!-- Bottom-center dock (all breakpoints — keeps outfield / pitch visible) -->
-      <div class="bet-dock-wrap">
-        {#if lastCashout}
-          <div class="win-toast-float" style="--accent: {accentColor}">
-            <div class="win-ring"></div>
-            <span>WIN +${lastCashout}</span>
-          </div>
-        {/if}
-        <BetPanel
-          bind:amount={localBet}
-          bind:autoCashout={autoCashoutVal}
-          disabled={!canBet && !game.betActive}
-          {actionState}
-          onCashout={cashout}
-          payout={currentPayout}
-          onMainAction={handleMainAction}
-        />
-      </div>
-    </main>
+  <!-- ─── Left panel ─── -->
+  <div class="left-cell">
+    <LeftPanel />
   </div>
-  <!-- ─── Stake-style Bottom Bar ─── -->
-  <footer class="bottom-bar">
-    <!-- Left: currency + balance + audio (moved off removed top strip) -->
-    <div class="bb-left">
-      <div class="currency-pill">
-        <span class="flag">🇺🇸</span>
-        <span class="curr-text">USD</span>
-        <span class="chevron">▾</span>
-      </div>
-      <div class="bb-balance">
-        <span class="bb-curr">{game.currency === 'USD' ? '$' : game.currency}</span>
-        <span>{game.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-      </div>
-      <button
-        type="button"
-        class="bb-audio"
-        aria-label={soundOn ? 'Mute audio' : 'Unmute audio'}
-        onclick={() => { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); }}
-      >
-        {soundOn ? '🔊' : '🔇'}
-      </button>
-    </div>
 
-    <!-- Center: Stake brand -->
-    <div class="bb-center">
-      <span class="stake-wordmark">Stake</span>
-    </div>
+  <!-- ─── Arena row (fills remaining height) ─── -->
+  <div class="arena-row">
+    <GameArena
+      arenaStatus={isBroadcast ? 'over_ended' : (game.visualPhase === 'celebrate' ? 'result' : game.visualPhase === 'bowl' ? 'bowling' : game.visualPhase === 'hit' ? 'hitting' : game.visualPhase === 'wicket' ? 'wicket' : 'waiting')}
+      overHistory={game.overSummary}
+      currentBallIdx={game.currentBallIdx}
+      accumulatedMult={mult}
+      {commentaryText}
+      {commentaryKey}
+      {streak}
+      rewardToast={game.pendingRewardToast}
+      skyHitToast={game.skyHitToast}
+      {scorecardData}
+      lossAmount={game.betAmount}
+      onRestart={() => {
+        setAutoPlay(false);
+        returnToIdle();
+      }}
+      onViewStats={dismissMatchOverlay}
+      resultStage1HoldMs={game.turboPlay || game.autoPlayOn ? 520 : 1750}
+    >
+      <CricketSimulation />
+    </GameArena>
 
-    <!-- Right: mode toggles -->
-    <div class="bb-right">
-      <button
-        class="mode-pill mode-active"
-        aria-label="Switch to Fun Play mode"
-        onclick={() => setGameMode('OVER')}
-      >
-        <span class="mode-dot"></span>
-        Fun Play
-      </button>
-      <button
-        class="mode-pill mode-real"
-        aria-label="Switch to Real Play mode"
-        onclick={() => setGameMode('POWERPLAY')}
-      >
-        <span class="mode-dot real-dot"></span>
-        Real Play
-      </button>
+    <!-- Floating notifications anchored to bottom of arena -->
+    <div class="arena-float">
+      {#if lastCashout}
+        <div class="win-toast-float" style="--accent: {accentColor}">
+          <div class="win-ring"></div>
+          <span>WIN +${lastCashout}</span>
+        </div>
+      {/if}
+      {#if showBallTicker && ballTicker}
+        <div class="ball-ticker" aria-label="Current over ball results">
+          {ballTicker}
+        </div>
+      {/if}
+      {#if game.autoPlayOn && commentaryText}
+        <div class="micro-comment" aria-hidden="true">{commentaryText}</div>
+      {/if}
     </div>
-  </footer>
+  </div>
+
+  <!-- ─── Right panel ─── -->
+  <div class="right-cell">
+    <RightPanel multiplier={mult} />
+  </div>
+
+  <!-- ─── BetPanel row ─── -->
+  <div class="bet-row">
+    <BetPanel
+      disabled={!canBet && !game.betActive}
+      {actionState}
+      onCashout={cashout}
+      payout={currentPayout}
+      onMainAction={handleMainAction}
+      onAutoplayRequest={requestAutoplay}
+    />
+  </div>
+
+  <!-- ─── Info panel and dialog (modal, above everything) ─── -->
+  <GameInfoPanel
+    open={showInfoPanel}
+    onClose={() => showInfoPanel = false}
+    {locale}
+  />
+
+  <AutoplayConfirmDialog
+    open={showAutoplayConfirm}
+    onConfirm={confirmAutoplay}
+    onCancel={cancelAutoplay}
+  />
+
+  <!-- ─── Overlay Manager ─── -->
+  {#if navigationState.activeOverlay === 'character'}
+    <CharacterOverlay />
+  {:else if navigationState.activeOverlay === 'difficulty'}
+    <DifficultyOverlay />
+  {:else if navigationState.activeOverlay === 'settings'}
+    <SettingsOverlay
+      bind:soundOn
+      onSoundToggle={() => { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); }}
+    />
+  {/if}
 </div>
 
 <style>
@@ -314,90 +381,125 @@
   }
 
   .page {
-    position: relative;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: 52px 1fr auto;
+    grid-template-areas:
+      "topbar   topbar  topbar"
+      "left     arena   right"
+      "betpanel betpanel betpanel";
     overflow: hidden;
-    background: #02020e;
+    background: #06060f;
     --accent: #6366f1;
     --accent-rgb: 99,102,241;
   }
 
+  .topbar-cell {
+    grid-area: topbar;
+    min-width: 0;
+  }
+
+  .left-cell {
+    grid-area: left;
+    overflow: hidden;
+  }
+
+  .right-cell {
+    grid-area: right;
+    overflow: hidden;
+  }
+
+  /* Subtle background texture */
   .page-bg {
     position: absolute;
     inset: 0;
     pointer-events: none;
     z-index: 0;
   }
-  .sky-gradient { display: none; }
-  .sky-glow { display: none; }
-  .sky-glow-left { display: none; }
-  .sky-glow-right { display: none; }
-  .sky-haze { display: none; }
+
   .scanlines {
     position: absolute;
     inset: 0;
-    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+                linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
     background-size: 100% 2px, 3px 100%;
     opacity: 0.025;
   }
+
   .vignette {
     position: absolute;
     inset: 0;
     background: radial-gradient(circle at 50% 50%, transparent 40%, rgba(0,0,0,0.35) 100%);
   }
 
-  .main-layout {
-    position: absolute;
-    inset: 0 0 52px;
-    display: flex;
+  /* ─── Arena row ─── */
+  .arena-row {
+    grid-area: arena;
+    position: relative;
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;
     z-index: 10;
   }
 
-  /* Bottom-centre bet HUD — anchored above footer, does not occlude sidewards turf */
-  .bet-dock-wrap {
+  /* Floating notifications at the bottom of the arena */
+  .arena-float {
     position: absolute;
-    left: 50%;
-    bottom: 8px;
-    transform: translateX(-50%);
+    left: 8px;
+    right: 8px;
+    bottom: 6px;
     z-index: 35;
-    width: min(600px, calc(100% - 24px));
-    pointer-events: none;
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
-    filter: drop-shadow(0 16px 36px rgba(0, 0, 0, 0.5));
-  }
-
-  .bet-dock-wrap > :global(.bet-dock) {
-    pointer-events: auto;
-  }
-
-  .arena-container {
-    flex: 1;
-    position: relative;
-    width: 100%;
-    min-width: 0;
-    background: transparent;
-    border-radius: 0;
-    overflow: hidden;
-    box-shadow: none;
-    border: 0;
-  }
-
-  .arena-container::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 30%;
-    background: linear-gradient(0deg, rgba(0,0,0,0.34), transparent);
+    gap: 6px;
     pointer-events: none;
+    filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.45));
+  }
+
+  /* ─── Bet row ─── */
+  .bet-row {
+    grid-area: betpanel;
     z-index: 20;
+    background: linear-gradient(180deg, #0e0e18 0%, #080810 100%);
+    border-top: 1px solid rgba(180, 140, 60, 0.28);
+    box-shadow:
+      0 -6px 28px rgba(0, 0, 0, 0.85),
+      inset 0 1px 0 rgba(200, 160, 80, 0.12);
+    padding: 0 10px 4px;
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+  }
+
+  /* ─── Floating UI ─── */
+  .ball-ticker {
+    pointer-events: none;
+    text-align: center;
+    font-family: ui-monospace, 'Orbitron', monospace;
+    font-size: 0.78rem;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    color: rgba(255, 255, 255, 0.55);
+    text-shadow: 0 0 12px rgba(0, 212, 255, 0.25);
+  }
+
+  .micro-comment {
+    pointer-events: none;
+    text-align: center;
+    font-size: 0.7rem;
+    font-weight: 950;
+    letter-spacing: 0.06em;
+    color: color-mix(in srgb, var(--accent, #6366f1) 75%, #fff);
+    text-shadow: 0 0 14px color-mix(in srgb, var(--accent, #6366f1) 40%, transparent);
+    animation: micro-pop 0.45s ease-out;
+  }
+
+  @keyframes micro-pop {
+    from { transform: translateY(6px); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
   }
 
   .win-toast-float {
@@ -426,188 +528,32 @@
     box-shadow: inset 0 0 22px color-mix(in srgb, var(--accent), transparent 40%);
     opacity: 0.85;
   }
+
   @keyframes slide-up {
     from { transform: translateY(20px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+    to   { transform: translateY(0); opacity: 1; }
   }
 
-  /* ── Stake-style Bottom Bar ── */
-  .bottom-bar {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    height: 52px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 0 16px;
-    background: rgba(5, 7, 13, 0.96);
-    border-top: 1px solid rgba(255,255,255,0.06);
-    backdrop-filter: blur(12px);
-    z-index: 50;
-  }
-
-  .bb-left, .bb-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .bb-balance {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-    padding: 6px 10px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 6px;
-    font-size: 0.78rem;
-    font-weight: 800;
-    font-family: 'Orbitron', monospace;
-    color: rgba(255,255,255,0.92);
-    letter-spacing: -0.02em;
-  }
-  .bb-curr {
-    font-size: 0.62rem;
-    font-weight: 700;
-    color: rgba(255,255,255,0.45);
-  }
-
-  .bb-audio {
-    flex-shrink: 0;
-    width: 40px;
-    height: 40px;
-    border: 1px solid rgba(255,255,255,0.1);
-    background: rgba(255,255,255,0.06);
-    color: #fff;
-    border-radius: 50%;
-    cursor: pointer;
-    font-size: 1rem;
-    display: grid;
-    place-items: center;
-    padding: 0;
-    appearance: none;
-  }
-
-  .bb-center {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    pointer-events: none;
-  }
-
-  .stake-wordmark {
-    font-family: Georgia, 'Times New Roman', serif;
-    font-style: italic;
-    font-size: 1.15rem;
-    font-weight: 700;
-    color: rgba(255,255,255,0.75);
-    letter-spacing: 0.01em;
-    text-shadow: 0 0 20px rgba(255,255,255,0.3);
-  }
-
-  .currency-pill {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 6px;
-    padding: 6px 9px;
-    cursor: pointer;
-    min-height: 36px;
-  }
-
-  .flag { font-size: 0.75rem; }
-
-  .curr-text {
-    font-size: 0.7rem;
-    font-weight: 700;
-    font-family: 'Orbitron', monospace;
-    color: rgba(255,255,255,0.7);
-    letter-spacing: 0.1em;
-  }
-
-  .chevron {
-    font-size: 0.6rem;
-    color: rgba(255,255,255,0.3);
-  }
-
-  .mode-pill {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 8px 12px;
-    border-radius: 20px;
-    border: 1px solid rgba(255,255,255,0.1);
-    background: rgba(255,255,255,0.04);
-    color: rgba(255,255,255,0.4);
-    font-size: 0.72rem;
-    font-weight: 700;
-    font-family: 'Orbitron', monospace;
-    letter-spacing: 0.05em;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .mode-pill.mode-active {
-    background: rgba(255,255,255,0.1);
-    border-color: rgba(255,255,255,0.2);
-    color: rgba(255,255,255,0.85);
-  }
-
-  .mode-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: #00ff88;
-    box-shadow: 0 0 6px rgba(0,255,136,0.8);
-  }
-
-  .real-dot {
-    background: #ffd700;
-    box-shadow: 0 0 6px rgba(255,215,0,0.8);
-  }
-
-  .bb-audio:focus-visible,
-  .mode-pill:focus-visible,
-  .currency-pill:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent, #6366f1) 70%, white);
-    outline-offset: 2px;
-  }
-
-  @media (max-width: 980px) {
-    .stake-wordmark {
-      display: none;
-    }
-    .bottom-bar {
-      justify-content: space-between;
+  /* ─── Responsive collapse ─── */
+  @media (max-width: 800px) {
+    .right-cell { display: none; }
+    .page {
+      grid-template-columns: auto 1fr;
+      grid-template-areas:
+        "topbar   topbar"
+        "left     arena"
+        "betpanel betpanel";
     }
   }
 
-  @media (max-width: 760px) {
-    .main-layout {
-      inset: 0 0 96px;
-    }
-    .bottom-bar {
-      height: auto;
-      min-height: 52px;
-      padding: 6px 10px;
-      display: grid;
+  @media (max-width: 540px) {
+    .left-cell { display: none; }
+    .page {
       grid-template-columns: 1fr;
-      row-gap: 6px;
-    }
-    .bb-left, .bb-right {
-      width: 100%;
-      justify-content: space-between;
-      flex-wrap: wrap;
-    }
-    .bb-center {
-      display: none;
-    }
-    .mode-pill {
-      flex: 1 1 calc(50% - 4px);
-      justify-content: center;
+      grid-template-areas:
+        "topbar"
+        "arena"
+        "betpanel";
     }
   }
 </style>

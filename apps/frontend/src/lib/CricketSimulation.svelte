@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { EngineBridge } from '../bridge/EngineBridge.js';
   import { bindBridge }   from '../core/gameController.svelte.js';
+  import { navigationState } from '../core/navigation.svelte.js';
 
   let host: HTMLDivElement;
   let engineBridge: EngineBridge | null = null;
@@ -15,7 +16,10 @@
     const rect = host.getBoundingClientRect();
     const params = new URLSearchParams(window.location.search);
     const debug = params.get('debug') === '1';
-    engineBridge = new EngineBridge(canvas, rect.width || 720, rect.height || 400, { debug });
+    engineBridge = new EngineBridge(canvas, rect.width || 720, rect.height || 400, { 
+      debug,
+      batsmanAvatarId: navigationState.selectedAvatarId 
+    });
 
     // Wire engine events → game controller reactive state
     bindBridge(engineBridge);

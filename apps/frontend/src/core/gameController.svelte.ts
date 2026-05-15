@@ -17,11 +17,11 @@ export function bindBridge(b: EngineBridge): void {
   _bridge = b;
   _callbacksRegistered = false;   // fresh bridge instance
   setupBridgeCallbacks();
+  syncAutobetFraming();
 }
 import {
   StakeGameClient,
   JurisdictionFlags,
-  GameModeName,
   PlayResult,
 } from './stakeClient.js';
 import type { BowlerType } from '../engine/physics/ballTrajectory.js';
@@ -39,7 +39,6 @@ export type DeliveryOutcome = { kind: 'runs'; runs: number } | { kind: 'wicket' 
 export type GamePhase =
   | 'initializing'
   | 'idle'
-  | 'betting'
   | 'animating' // Session is active
   | 'broadcast' // Post-over/wicket display phase
   | 'error';
@@ -65,7 +64,7 @@ interface BetConfig {
 interface StakeTicket {
   id: number;
   source: 'main' | 'bonus';
-  betAmountApi: number;y
+  betAmountApi: number;
   entryMultiplier: number;
   bonusProductAtEntry: number;
   settled: boolean;
@@ -92,7 +91,10 @@ export const game = $state({
   visualPhase: 'idle' as VisualPhase,
   phaseProgress: 0,
   bowlerType: 'Fast' as BowlerType,
-  selectedMode: GAME_MODES.OVER as GameModeName,
+  /** Arcade: repeat next POWERPLAY bet after each result until toggled off. */
+  autoPlayOn: false,
+  /** Shorter gaps between result → next bowl when on. */
+  turboPlay: false,
   currentDeliveries: [] as Delivery[],
   currentBallIdx: 0,
   canCashout: false,
@@ -176,6 +178,22 @@ function emitDecomposerTelemetry(
   }
 }
 
+function syncAutobetFraming(): void {
+  _bridge?.setAutobetFraming(game.autoPlayOn);
+}
+
+function interBallResultDelayMs(): number {
+  if (game.turboPlay) return Math.max(380, 900);
+  if (game.autoPlayOn) return Math.max(420, 1100);
+  return 3500;
+}
+
+function broadcastWaitMs(): number {
+  if (game.turboPlay) return Math.max(500, 1800);
+  if (game.autoPlayOn) return Math.max(400, 700);
+  return 4000;
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -236,16 +254,13 @@ export async function swing(): Promise<void> {
 
 export async function placeBet(): Promise<void> {
   if (!client || game.betAmount <= 0) return;
-  if (game.phase === 'betting' || game.betActive) return;
+  if (game.betActive) return;
 
-  const mode = game.selectedMode;
-  const isMidSession = game.sessionActive;
-  
-  // If mid-session, we need a new Stake outcome for the REMAINING balls
+  const stakeMode = GAME_MODES.POWERPLAY;
   const apiAmount = Math.round(game.betAmount * API_MULTIPLIER);
-  
+
   try {
-    const result: PlayResult = await client.play(apiAmount, mode);
+    const result: PlayResult = await client.play(apiAmount, stakeMode);
     game.balance = ParseAmount(result.balance.amount);
 
     const betID = betIdFromRound(result.round);
@@ -255,7 +270,9 @@ export async function placeBet(): Promise<void> {
           v: 1,
           kind: 'bet_placed',
           betID,
-          mode,
+          mode: stakeMode,
+          autoPlayOn: game.autoPlayOn,
+          turboPlay: game.turboPlay,
           payoutMultiplier: result.payoutMultiplier,
         }),
       );
@@ -263,49 +280,32 @@ export async function placeBet(): Promise<void> {
       /* ignore */
     }
 
-    // Calculate how many balls are left in the over
-    const startIdx = isMidSession ? game.currentBallIdx + 1 : 0;
-
     const forced = game.isDevMode ? getForcedDecomposeOptions() : undefined;
     const { deliveries: newSeq, telemetry: decompTelemetry } = generateDeliveries(
       result.payoutMultiplier,
-      mode,
+      stakeMode,
       { betID, ...forced },
     );
-    emitDecomposerTelemetry(client, decompTelemetry, { betID, mode });
+    emitDecomposerTelemetry(client, decompTelemetry, { betID, mode: stakeMode });
 
-    if (!isMidSession) {
-      // Starting a fresh session
-      game.currentDeliveries = newSeq;
-      game.overSummary = new Array(newSeq.length).fill(null);
-      game.currentBallIdx = 0;
-      game.displayMultiplier = 1;
-      game.entryMultiplier = 1;
-      game.baseBallCount = 6;
-      game.bonusBallCount = 0;
-      game.totalBallCount = newSeq.length || 6;
-      game.bonusProfitMultProduct = 1;
-      game.sessionActive = true;
-      game.deliveryKey++;
-      game.phase = 'animating';
-      
-      // Bowl the first pre-planned delivery.
-      const first = newSeq[0];
-      _bridge?.triggerBowl(first ? makeEngineOutcome(first) : undefined);
-    } else {
-      // Joining current session
-      // We overwrite the FUTURE deliveries with the new result
-      const updatedDeliveries = [...game.currentDeliveries];
-      for (let i = 0; i < newSeq.length && (startIdx + i) < 6; i++) {
-        updatedDeliveries[startIdx + i] = newSeq[i]!;
-      }
-      game.currentDeliveries = updatedDeliveries;
-      // bridge.updateDeliveries(game.currentDeliveries); // To be implemented if mid-session changing needed in 3D
-      
-      game.entryMultiplier = game.displayMultiplier;
-      game.totalBallCount = game.currentDeliveries.length || 6;
-      game.bonusBallCount = Math.max(0, game.totalBallCount - game.baseBallCount);
-    }
+    game.currentDeliveries = newSeq;
+    game.overSummary = new Array(newSeq.length).fill(null);
+    game.currentBallIdx = 0;
+    game.displayMultiplier = 1;
+    game.entryMultiplier = 1;
+    game.baseBallCount = newSeq.length || 1;
+    game.totalBallCount = newSeq.length || 1;
+    game.bonusBallCount = Math.max(0, game.totalBallCount - game.baseBallCount);
+    game.bonusProfitMultProduct = 1;
+    game.sessionActive = true;
+    game.deliveryKey++;
+    game.phase = 'animating';
+
+    const first = newSeq[0];
+    _bridge?.triggerBowl(
+      first ? makeEngineOutcome(first) : undefined,
+      first ? { shotType: first.shotType } : undefined,
+    );
 
     const mainTicket = createTicket({
       source: 'main',
@@ -322,6 +322,8 @@ export async function placeBet(): Promise<void> {
   } catch (err) {
     console.error('[GameController] Bet failed:', err);
     game.errorMessage = err instanceof Error ? err.message : 'Bet failed';
+    game.autoPlayOn = false;
+    syncAutobetFraming();
   }
 }
 
@@ -369,7 +371,10 @@ function advanceBall(): void {
 
   game.currentBallIdx = nextIdx;
   const nextDelivery = game.currentDeliveries[nextIdx];
-  _bridge?.triggerBowl(nextDelivery ? makeEngineOutcome(nextDelivery) : undefined);
+  _bridge?.triggerBowl(
+    nextDelivery ? makeEngineOutcome(nextDelivery) : undefined,
+    nextDelivery ? { shotType: nextDelivery.shotType } : undefined,
+  );
 }
 
 async function requestBonusDelivery(sourceId: string): Promise<void> {
@@ -518,10 +523,8 @@ function setupBridgeCallbacks() {
 
       game.visualPhase = 'celebrate';
 
-      // Show commentary (resultStage 1) for 1750 ms, then MultiplierDisplay
-      // (resultStage 2) for a further 1750 ms, then bowl next ball.
-      // Total inter-ball gap = 3500 ms.
-      setTimeout(advanceBall, 3500);
+      // Commentary card, then multiplier, then next ball (or session end).
+      setTimeout(advanceBall, interBallResultDelayMs());
     },
 
     onSkyObjectSpawned: ({ type }) => {
@@ -573,11 +576,25 @@ async function handleSessionEnd(_finalMult: number) {
 
   game.sessionActive = false;
   game.phase = 'broadcast';
-  
-  // Scorecard overlay shows during broadcast — auto-dismiss after 4s if user doesn't replay
-  await new Promise(r => setTimeout(r, 4000));
-  
+
+  // Scorecard overlay shows during broadcast — auto-dismiss after delay if user doesn't replay
+  await new Promise((r) => setTimeout(r, broadcastWaitMs()));
+
   returnToIdle();
+  syncAutobetFraming();
+
+  if (!game.autoPlayOn) return;
+
+  const gapMs = game.turboPlay ? 420 : 780;
+  await new Promise((r) => setTimeout(r, gapMs));
+  if (!game.autoPlayOn) return;
+  if (game.betActive || game.sessionActive) return;
+  if (game.betAmount > game.balance) {
+    game.autoPlayOn = false;
+    syncAutobetFraming();
+    return;
+  }
+  await placeBet();
 }
 
 export async function cashout(): Promise<void> {
@@ -708,13 +725,35 @@ export function selectBetLevel(index: number): void {
   }
 }
 
+export function nudgeBetAmount(deltaSteps: number): void {
+  const step = game.betConfig.step > 0 ? game.betConfig.step : 0.5;
+  setBetAmount(game.betAmount + deltaSteps * step);
+}
+
 /**
- * Sets the current game mode.
+ * Autoplay: after each settled ball, automatically place the next bet until toggled off.
  */
-export function setGameMode(mode: GameModeName): void {
-  if (game.phase === 'idle') {
-    game.selectedMode = mode;
+export function setAutoPlay(on: boolean): void {
+  const was = game.autoPlayOn;
+  game.autoPlayOn = on;
+  syncAutobetFraming();
+  if (on && !was && !game.sessionActive && !game.betActive && game.phase === 'idle' && client) {
+    if (game.betAmount > 0 && game.betAmount <= game.balance) {
+      void placeBet();
+    }
   }
+}
+
+export function toggleAutoPlay(): void {
+  setAutoPlay(!game.autoPlayOn);
+}
+
+export function setTurboPlay(on: boolean): void {
+  game.turboPlay = on;
+}
+
+export function toggleTurboPlay(): void {
+  game.turboPlay = !game.turboPlay;
 }
 
 /**
@@ -740,6 +779,7 @@ export function getEffectiveTicketMultiplier(): number {
  * Cleanup on unmount.
  */
 export function destroyGame(): void {
+  _bridge?.setAutobetFraming(false);
   _bridge = null;
   _callbacksRegistered = false;
   client?.destroy();

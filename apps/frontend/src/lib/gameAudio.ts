@@ -420,3 +420,63 @@ export function playCrowdShout(intensity: number): void {
   src.start(); src.stop(c.currentTime + dur);
 }
 
+
+/** Victory Fanfare — triumphant multi-oscillator sequence */
+export function playVictoryFanfare(): void {
+  const c = resume();
+  if (!c) return;
+  const master = c.createGain();
+  master.gain.value = 0.2;
+  master.connect(c.destination);
+
+  const notes = [
+    { f: 523.25, t: 0.0 }, // C5
+    { f: 659.25, t: 0.15 }, // E5
+    { f: 783.99, t: 0.3 },  // G5
+    { f: 1046.50, t: 0.45 }, // C6
+  ];
+
+  notes.forEach((n) => {
+    const o = c.createOscillator();
+    const g = c.createGain();
+    o.type = 'triangle';
+    o.frequency.value = n.f;
+    const startTime = c.currentTime + n.t;
+    g.gain.setValueAtTime(0, startTime);
+    g.gain.linearRampToValueAtTime(0.15, startTime + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.001, startTime + 0.6);
+    o.connect(g); g.connect(master);
+    o.start(startTime); o.stop(startTime + 0.65);
+  });
+
+  // Brass-like layer
+  const brass = c.createOscillator();
+  const brassG = c.createGain();
+  brass.type = 'sawtooth';
+  brass.frequency.value = 261.63; // C4
+  const bStart = c.currentTime + 0.45;
+  brassG.gain.setValueAtTime(0, bStart);
+  brassG.gain.linearRampToValueAtTime(0.1, bStart + 0.1);
+  brassG.gain.exponentialRampToValueAtTime(0.001, bStart + 1.2);
+  const lp = c.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 1200;
+  brass.connect(lp); lp.connect(brassG); brassG.connect(master);
+  brass.start(bStart); brass.stop(bStart + 1.3);
+}
+
+/** Broadcast Score Ticker sound */
+export function playTickerUpdate(): void {
+  const c = resume();
+  if (!c) return;
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.type = 'square';
+  o.frequency.setValueAtTime(1200, c.currentTime);
+  o.frequency.linearRampToValueAtTime(1800, c.currentTime + 0.04);
+  g.gain.setValueAtTime(0.05, c.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.04);
+  o.connect(g); g.connect(c.destination);
+  o.start(); o.stop(c.currentTime + 0.05);
+}
+

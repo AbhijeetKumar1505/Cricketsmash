@@ -26,6 +26,12 @@ export interface FeedbackState {
   pauseRemaining: number;
   /** Live particle list. Renderer reads this to draw burst effects. */
   particles: Particle[];
+  /**
+   * Hit quality for the most recent swing resolution. Set by FeedbackSystem.triggerHit.
+   * Used by the CharacterController FSM (M6) and the AnimationStack to drive
+   * `edge` reactions, keeper catches, and post-impact recoil intensity.
+   */
+  hitQuality?: HitQuality | 'edge' | 'none';
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -50,6 +56,7 @@ export function makeFeedbackState(): FeedbackState {
     shakeOffset:    { x: 0, y: 0, z: 0 },
     pauseRemaining: 0,
     particles:      [],
+    hitQuality:     'none',
   };
 }
 
@@ -104,6 +111,10 @@ export class FeedbackSystem {
                           : quality === 'good'    ? 0.22
                           : 0.06) + bucketBoost;
     state.pauseRemaining  = quality !== 'miss' ? Math.min(0.05, TIMING.HIT_PAUSE) : 0;
+
+    // M6: surface the resolved quality on FeedbackState so the AnimationStack /
+    // CharacterController can route to keeper.catch / batsman.recover variants.
+    state.hitQuality = quality;
 
     this.spawnBurst(state, hitPos, quality);
     if (bucket === 'four' || bucket === 'six') {

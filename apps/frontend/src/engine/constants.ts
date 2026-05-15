@@ -86,7 +86,7 @@ export const HIT_TIMES: Record<'fast' | 'spin' | 'swing', number> = {
 // ── Camera ────────────────────────────────────────────────────────────────────
 
 export const CAMERA = {
-  FOV:          65,
+  FOV:          52,
   NEAR:         0.1,
   FAR:          1000,
 
@@ -98,8 +98,8 @@ export const CAMERA = {
 
   PRESETS: {
     /** Must stay in sync with `render/Camera.ts` broadcast gameplay preset. */
-    broadcast:   { pos: [0, 3.72, 10] as const, lookAt: [0, 4.2, -8.55] as const },
-    bowler:      { pos: [0,  3,  -13] as const, lookAt: [0, 1,   2] as const },
-    batsman:     { pos: [0,  3,   13] as const, lookAt: [0, 1,  -3] as const },
+    broadcast:   { pos: [0, 3.9, 11.5] as const, lookAt: [0, 1.5, -5.5] as const },
+    bowler:      { pos: [0,  3,  -13] as const, lookAt: [0, 1,    2  ] as const },
+    batsman:     { pos: [0,  3,   13] as const, lookAt: [0, 1,   -3  ] as const },
   },
 } as const;

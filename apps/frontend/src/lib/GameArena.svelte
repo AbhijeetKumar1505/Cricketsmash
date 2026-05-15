@@ -42,6 +42,8 @@
     lossAmount = 0,
     onRestart = () => {},
     onViewStats = () => {},
+    /** Shorter hold for autobet (ms) before showing multiplier stage. */
+    resultStage1HoldMs = 1750,
     children,
   }: {
     arenaStatus?: ArenaBroadcastStatus;
@@ -68,6 +70,7 @@
     lossAmount?: number;
     onRestart?: () => void;
     onViewStats?: () => void;
+    resultStage1HoldMs?: number;
     children: Snippet;
   } = $props();
 
@@ -142,7 +145,7 @@
     resultStage = 1;
     const t = setTimeout(() => {
       resultStage = 2;
-    }, 1750);
+    }, resultStage1HoldMs);
     return () => clearTimeout(t);
   });
 
@@ -190,8 +193,8 @@
 >
   <!-- ─── Stadium Background & Atmosphere ─── -->
   <div class="arena-background-layer absolute inset-0 z-0">
-    <!-- Darkened Base Stadium -->
-    <div class="absolute inset-0 bg-[#05070d] z-0"></div>
+    <!-- Daytime chrome (canvas is opaque; softens bezel / rounded corners) -->
+    <div class="absolute inset-0 bg-[#0a1624] z-0"></div>
 
     <!-- Mega Neon Gradient Washes -->
     <div
@@ -207,7 +210,7 @@
 
     <!-- Vignette & HUD Occlusion -->
     <div
-      class="absolute inset-0 bg-radial-[ellipse_at_center,_transparent_40%,_#05070d_110%] opacity-90"
+      class="absolute inset-0 bg-radial-[ellipse_at_center,_transparent_42%,_#0a1624_115%] opacity-75"
     ></div>
   </div>
 
@@ -629,7 +632,7 @@
   .bo-logo {
     position: absolute;
     top: 22px;
-    left: 50%;
+    left: 44%;
     transform: translateX(-50%);
     width: 180px;
     height: auto;

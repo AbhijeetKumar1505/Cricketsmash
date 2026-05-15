@@ -12,6 +12,9 @@ export type AnimPhase =
   | 'celebrate'  // arms up / jump
   | 'stumped';   // slumped after wicket
 
+import type { ShotType } from '../../core/modeEngine.js';
+import type { BowlerType } from '../physics/ballTrajectory.js';
+
 export interface CharacterAnimState {
   phase: AnimPhase;
 
@@ -28,6 +31,12 @@ export interface CharacterAnimState {
 
   /** Idle phase accumulator (optional sway / secondary motion; not vertical hop). */
   breathPhase: number;
+
+  // ── M6: intent fields populated by GameEngine on startBowl() ────────────
+  /** Active shot type for the batsman (Execute sub-state). */
+  shotType?: ShotType;
+  /** Active bowler type for this delivery. */
+  bowlerType?: BowlerType;
 }
 
 // ── Spring constants ──────────────────────────────────────────────────────────

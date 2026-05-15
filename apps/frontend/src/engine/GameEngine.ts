@@ -37,6 +37,7 @@ import type { FeedbackState } from './systems/FeedbackSystem.js';
 import type { RoundData }     from './systems/RoundSystem.js';
 import type { DeliveryOutcome, ShotResult } from './rng/OutcomeSystem.js';
 import { GameState } from './state/StateMachine.js';
+import type { ShotType } from '../core/modeEngine.js';
 
 // ── New deterministic physics modules ─────────────────────────────────────────
 import { BallController }  from './physics/ballController.js';
@@ -88,8 +89,15 @@ export interface EngineSnapshot {
 
 // ── Input union ───────────────────────────────────────────────────────────────
 
+/** Optional intent passed alongside the engine outcome — used by the
+ *  CharacterController FSM (M6) to drive shot-type sub-states without
+ *  forcing the engine to know about the modeEngine vocabulary. */
+export interface DeliveryIntent {
+  shotType?: ShotType;
+}
+
 export type EngineInput =
-  | { type: 'bowl';  outcome: DeliveryOutcome }
+  | { type: 'bowl';  outcome: DeliveryOutcome; intent?: DeliveryIntent }
   | { type: 'swing' }
   | { type: 'reset' };
 
@@ -184,7 +192,7 @@ export class GameEngine {
 
   handleInput(input: EngineInput): void {
     switch (input.type) {
-      case 'bowl':  this.startBowl(input.outcome); break;
+      case 'bowl':  this.startBowl(input.outcome, input.intent); break;
       case 'swing': this.registerSwing();           break;
       case 'reset': this.resetToIdle();             break;
     }
@@ -252,7 +260,7 @@ export class GameEngine {
 
   // ── Private: phase logic ───────────────────────────────────────────────────
 
-  private startBowl(outcome: DeliveryOutcome): void {
+  private startBowl(outcome: DeliveryOutcome, intent?: DeliveryIntent): void {
     if (!this.sm.transition(GameState.BETTING)) return;
     if (!this.sm.transition(GameState.BOWLER_RUNUP)) return;
 
@@ -262,6 +270,13 @@ export class GameEngine {
     this._bonusEligible = false;
     this._skyImpactEmitted = false;
     this.currentShot    = this.outcomeSys.toShotResult(outcome);
+
+    // M6: publish delivery intent on the per-character anim states so the
+    // CharacterController FSM can pick sub-states without re-deriving from bucket.
+    this.bowler.bowlerType  = (outcome.bowlerType.charAt(0).toUpperCase() + outcome.bowlerType.slice(1)) as CharacterAnimState['bowlerType'];
+    this.batsman.shotType   = intent?.shotType ?? this.deriveShotTypeFromBucket(outcome);
+    this.batsman.bowlerType = this.bowler.bowlerType;
+    this.feedback.hitQuality = 'none';
 
     // ── New: seed deterministic RNG for this delivery ──────────────────────
     this._ballId += 1;
@@ -568,6 +583,17 @@ export class GameEngine {
       this.physicsCtrl.stop();
       this._activeFielder = -1;
     }
+  }
+
+  /** Fallback shot-type when no explicit intent is supplied (mock / legacy paths). */
+  private deriveShotTypeFromBucket(outcome: DeliveryOutcome): ShotType {
+    if (outcome.bucket === 'wicket' || outcome.result === 'wicket') return 'bowled';
+    if (outcome.bucket === 'six')    return 'loft';
+    if (outcome.bucket === 'four')   return 'cut';
+    if (outcome.bucket === 'triple') return 'run_three';
+    if (outcome.bucket === 'double') return 'pushed_two';
+    if (outcome.bucket === 'single') return 'quick_single';
+    return 'defend';
   }
 
   private resetToIdle(): void {

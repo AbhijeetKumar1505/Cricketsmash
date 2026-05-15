@@ -12,6 +12,7 @@
  */
 
 import { GameEngine }    from '../engine/GameEngine.js';
+import type { DeliveryIntent } from '../engine/GameEngine.js';
 import { Renderer }      from '../render/Renderer.js';
 import { GameLoop }      from '../engine/loop/GameLoop.js';
 import { OutcomeSystem } from '../engine/rng/OutcomeSystem.js';
@@ -79,7 +80,7 @@ export class EngineBridge {
     canvas: HTMLCanvasElement,
     width: number,
     height: number,
-    options: { debug?: boolean } = {},
+    options: { debug?: boolean; batsmanAvatarId?: string } = {},
   ) {
     this.engine   = new GameEngine();
     this.renderer = new Renderer(canvas, width, height, options);
@@ -184,10 +185,14 @@ export class EngineBridge {
   /**
    * Start a new delivery. Pass a pre-computed DeliveryOutcome from the server.
    * For local/demo mode, pass null to get a random outcome.
+   *
+   * `intent` (optional) lets gameController pass through `shotType` from the
+   * modeEngine decomposition — used by the CharacterController FSM (M6) to
+   * pick the batsman's Execute sub-state.
    */
-  triggerBowl(outcome?: DeliveryOutcome | null): void {
+  triggerBowl(outcome?: DeliveryOutcome | null, intent?: DeliveryIntent): void {
     const resolved = outcome ?? this.outcomes.localRandom();
-    this.engine.handleInput({ type: 'bowl', outcome: resolved });
+    this.engine.handleInput({ type: 'bowl', outcome: resolved, intent });
   }
 
   /** Register a swing input. Call on user tap / click / key press. */
@@ -209,6 +214,11 @@ export class EngineBridge {
   /** Push scoreboard state to the 3D stadium display. */
   updateScoreboard(ballIdx: number, totalBalls: number, multiplier: number): void {
     this.renderer.updateScoreboard(ballIdx, totalBalls, multiplier);
+  }
+
+  /** Slightly wider camera while autobet is active (reduces visual fatigue). */
+  setAutobetFraming(active: boolean): void {
+    this.renderer.setAutobetFraming(active);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

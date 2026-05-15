@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { WORLD } from '../../engine/constants.js';
+import { GameState } from '../../engine/state/StateMachine.js';
+import { SponsorBannerSystem } from '../../engine/arena/sponsorBanners.js';
+import { StadiumActivitySystem } from '../../engine/arena/stadiumActivities.js';
 import type { DoodleAssets } from '../doodle/DoodleAssets.js';
 
 const MID_Z = (WORLD.STUMPS_FAR_Z + WORLD.STUMPS_NEAR_Z) / 2;
@@ -54,25 +57,29 @@ function makeOutfieldTexture(): THREE.CanvasTexture {
   cv.height = size;
   const cx = cv.getContext('2d')!;
 
-  const bands = 12;
+  // Deep vivid mowing bands — night-lit field looks rich saturated green
+  const bands = 14;
   const bandH = size / bands;
   for (let i = 0; i < bands; i++) {
-    cx.fillStyle = i % 2 === 0 ? '#a8d86e' : '#98cf5d';
+    cx.fillStyle = i % 2 === 0 ? '#2a9e3c' : '#238534';
     cx.fillRect(0, i * bandH, size, bandH);
   }
 
-  cx.strokeStyle = 'rgba(255,255,255,0.14)';
-  cx.lineWidth = 6;
+  // Bright sheen line between bands
+  cx.strokeStyle = 'rgba(255,255,255,0.28)';
+  cx.lineWidth = 5;
   for (let i = 1; i < bands; i += 2) {
     cx.beginPath();
     cx.moveTo(0, i * bandH);
     cx.lineTo(size, i * bandH);
     cx.stroke();
   }
+
+  // Subtle noise
   for (let i = 0; i < 2200; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
-    cx.fillStyle = i % 3 === 0 ? 'rgba(255,255,255,0.018)' : 'rgba(0,0,0,0.022)';
+    cx.fillStyle = i % 3 === 0 ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.018)';
     cx.fillRect(x, y, 1.6, 1.6);
   }
 
@@ -83,34 +90,72 @@ function makeOutfieldTexture(): THREE.CanvasTexture {
 }
 
 function makePitchTexture(): THREE.CanvasTexture {
-  const w = 256;
-  const h = 512;
+  const w = 512;
+  const h = 1024;
   const cv = document.createElement('canvas');
   cv.width = w;
   cv.height = h;
   const cx = cv.getContext('2d')!;
 
-  cx.fillStyle = '#e6c897';
+  // Rich sun-baked clay base
+  cx.fillStyle = '#c9a462';
   cx.fillRect(0, 0, w, h);
 
-  cx.strokeStyle = 'rgba(255,255,255,0.14)';
-  cx.lineWidth = 4;
-  for (let y = 24; y < h; y += 28) {
+  // Worn centre strip — darker where ball lands repeatedly
+  const centerGrad = cx.createLinearGradient(w * 0.28, 0, w * 0.72, 0);
+  centerGrad.addColorStop(0,   'rgba(110,75,28,0)');
+  centerGrad.addColorStop(0.5, 'rgba(110,75,28,0.22)');
+  centerGrad.addColorStop(1,   'rgba(110,75,28,0)');
+  cx.fillStyle = centerGrad;
+  cx.fillRect(0, 0, w, h);
+
+  // Rolling stripes (light sheen from the roller)
+  cx.strokeStyle = 'rgba(255,240,200,0.13)';
+  cx.lineWidth = 5;
+  for (let y = 18; y < h; y += 22) {
     cx.beginPath();
-    cx.moveTo(18, y);
-    cx.lineTo(w - 18, y);
+    cx.moveTo(14, y);
+    cx.lineTo(w - 14, y);
     cx.stroke();
   }
 
-  cx.strokeStyle = 'rgba(145,110,64,0.12)';
-  cx.lineWidth = 2;
-  cx.strokeRect(8, 8, w - 16, h - 16);
-  for (let i = 0; i < 620; i++) {
-    const x = 10 + Math.random() * (w - 20);
-    const y = 10 + Math.random() * (h - 20);
-    cx.fillStyle = i % 2 === 0 ? 'rgba(120,90,50,0.03)' : 'rgba(255,255,255,0.02)';
-    cx.fillRect(x, y, 1.4, 1.4);
+  // Fine cracks — centre and crease zones
+  cx.strokeStyle = 'rgba(90,58,20,0.28)';
+  const rng = (n: number) => ((n * 1664525 + 1013904223) & 0x7fffffff) / 0x7fffffff;
+  for (let i = 0; i < 18; i++) {
+    const startX = w * 0.25 + rng(i * 7) * w * 0.5;
+    const startY = rng(i * 13) * h;
+    cx.lineWidth = 0.8 + rng(i * 5) * 0.8;
+    cx.beginPath();
+    cx.moveTo(startX, startY);
+    let cx2 = startX, cy2 = startY;
+    for (let j = 0; j < 4; j++) {
+      cx2 += (rng(i * 11 + j) - 0.5) * 28;
+      cy2 += (rng(i * 17 + j) - 0.5) * 18;
+      cx.lineTo(cx2, cy2);
+    }
+    cx.stroke();
   }
+
+  // Scuff marks near crease ends (front + back 18% of pitch)
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < 90; i++) {
+      const x = 12 + rng(pass * 200 + i) * (w - 24);
+      const baseY = pass === 0 ? rng(pass * 300 + i) * h * 0.18 : h - rng(pass * 300 + i) * h * 0.18;
+      const len = 5 + rng(pass * 400 + i) * 14;
+      cx.strokeStyle = `rgba(88,58,20,${0.07 + rng(pass * 500 + i) * 0.11})`;
+      cx.lineWidth = 0.7 + rng(pass * 600 + i);
+      cx.beginPath();
+      cx.moveTo(x, baseY);
+      cx.lineTo(x + (rng(pass * 700 + i) - 0.5) * len, baseY + rng(pass * 800 + i) * len);
+      cx.stroke();
+    }
+  }
+
+  // Darker edge border
+  cx.strokeStyle = 'rgba(80,50,18,0.28)';
+  cx.lineWidth = 9;
+  cx.strokeRect(10, 10, w - 20, h - 20);
 
   return toTexture(cv);
 }
@@ -190,6 +235,7 @@ type CrowdSprite = {
   basePosition: THREE.Vector3;
   scale: number;
   phase: number;
+  angle: number;  // azimuth around pitch centre — drives Mexican-wave propagation
 };
 
 type DriftSprite = {
@@ -217,6 +263,13 @@ export class StadiumEntity {
   private readonly _sponsorTextures: THREE.CanvasTexture[] = [];
   private _time = 0;
 
+  /** LED ribbon + flash/confetti — local origin = pitch centre (parented at `MID_Z`). */
+  private readonly _arenaLivingRoot = new THREE.Group();
+  private readonly _sponsorRibbon: SponsorBannerSystem;
+  private readonly _activities: StadiumActivitySystem;
+  /** Extra Mexican-wave amplitude after boundaries (decays). */
+  private _crowdWaveBoost = 0;
+
   constructor(assets: DoodleAssets) {
     this.root = new THREE.Group();
 
@@ -229,10 +282,19 @@ export class StadiumEntity {
     this.buildWheatFence(assets);
     this.buildSponsorBoards();
     this.buildStands();
+    this.buildStandRailings();
+    this.buildCrowdBackdrop();
     this.buildCrowd(assets);
-    this.buildSun();
-    this.buildClouds(assets);
+    this.buildFloodlightTowers();
     this.buildForegroundTufts();
+    this.buildAtmosphericHaze();
+
+    this._sponsorRibbon = new SponsorBannerSystem();
+    this._activities = new StadiumActivitySystem();
+    this._arenaLivingRoot.position.set(0, 0, MID_Z);
+    this._arenaLivingRoot.add(this._sponsorRibbon.group);
+    this._arenaLivingRoot.add(this._activities.group);
+    this.root.add(this._arenaLivingRoot);
 
     this.root.add(this._crowd);
 
@@ -247,18 +309,38 @@ export class StadiumEntity {
     this._scoreboardTex.needsUpdate = true;
   }
 
-  updateAnimations(dt: number, camera?: THREE.Camera): void {
+  /**
+   * Drives LED ribbon pulse + living-stadium micro-FX. `enginePhase` is `GameState` string.
+   */
+  updateAnimations(dt: number, camera: THREE.Camera | undefined, enginePhase: string): void {
     this._time += dt;
 
+    this._crowdWaveBoost = Math.max(0, this._crowdWaveBoost - dt * 0.45);
+
+    const ribbonPhase =
+      enginePhase === GameState.BOWLER_RUNUP ||
+      enginePhase === GameState.BALL_RELEASE ||
+      enginePhase === GameState.BALL_TRAVEL
+        ? 'bowl'
+        : enginePhase === GameState.HIT || enginePhase === GameState.BALL_RESULT
+          ? 'hit'
+          : 'idle';
+    this._sponsorRibbon.update(dt, ribbonPhase);
+    this._activities.update(dt);
+
     for (const sprite of this._crowdSprites) {
-      const sway = Math.sin(this._time * 1.5 + sprite.phase) * 0.035;
-      const bob = Math.sin(this._time * 1.8 + sprite.phase) * 0.012;
+      // Mexican-wave: slow travelling pulse keyed to each sprite's azimuth angle.
+      const wave = Math.sin(sprite.angle * 1.8 - this._time * 0.75) * 0.5 + 0.5;
+      const bobAmp = 0.06 + 0.14 * this._crowdWaveBoost;
+      const bob  = wave * bobAmp + Math.sin(this._time * 1.8 + sprite.phase) * 0.009;
+      const sway = Math.sin(this._time * 1.4 + sprite.phase) * 0.022;
       sprite.mesh.position.set(
         sprite.basePosition.x + sway,
         sprite.basePosition.y + bob,
-        sprite.basePosition.z + Math.cos(this._time * 1.2 + sprite.phase) * 0.02,
+        sprite.basePosition.z + Math.cos(this._time * 1.1 + sprite.phase) * 0.012,
       );
-      sprite.mesh.scale.setScalar(sprite.scale);
+      const scalePulse = 0.05 + 0.12 * this._crowdWaveBoost;
+      sprite.mesh.scale.setScalar(sprite.scale * (1 + wave * scalePulse));
       if (camera) sprite.mesh.lookAt(camera.position);
     }
 
@@ -282,7 +364,37 @@ export class StadiumEntity {
     }
   }
 
+  /** First delivery run-up of an over — sweep spotlights through the crowd. */
+  onSessionPlayStart(): void {
+    this._activities.triggerSpotlightSweep();
+  }
+
+  /**
+   * Edge-triggered from Renderer when `round.outcome` resolves.
+   * Drives contextual LED copy + crowd / confetti reactions.
+   */
+  onDeliverySpectacle(kind: 'four' | 'six' | 'wicket' | 'miss'): void {
+    this._sponsorRibbon.triggerEvent(kind);
+    if (kind === 'six') {
+      this._activities.triggerConfetti();
+      this._crowdWaveBoost = 1;
+    } else if (kind === 'four') {
+      this._crowdWaveBoost = 0.55;
+    }
+    if (kind === 'wicket' || kind === 'miss') {
+      this._activities.setExcitement(0.12);
+    }
+  }
+
+  /** Continuous excitement for phone-flash / camera flashes (0–1). */
+  setLivingExcitement(level: number): void {
+    this._activities.setExcitement(level);
+  }
+
   dispose(): void {
+    this._arenaLivingRoot.removeFromParent();
+    this._sponsorRibbon.dispose();
+    this._activities.dispose();
     this.root.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       if (!mesh.isMesh) return;
@@ -298,7 +410,7 @@ export class StadiumEntity {
   private buildOutfield(): void {
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(140, 140),
-      new THREE.MeshBasicMaterial({ map: makeOutfieldTexture() }),
+      new THREE.MeshStandardMaterial({ map: makeOutfieldTexture(), roughness: 0.88, metalness: 0.0 }),
     );
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(0, 0, MID_Z);
@@ -308,13 +420,27 @@ export class StadiumEntity {
   private buildPitch(): void {
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(3.2, PITCH_LEN),
-      new THREE.MeshBasicMaterial({ map: makePitchTexture() }),
+      new THREE.MeshStandardMaterial({ map: makePitchTexture(), roughness: 0.78, metalness: 0.0 }),
     );
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(0, 0.003, MID_Z);
     mesh.scale.x = 0.9;
     mesh.scale.z = 0.85;
     this.root.add(mesh);
+
+    // Subtle edge glow strips — cinematic separation from field
+    const edgeMat = new THREE.MeshBasicMaterial({
+      color: 0xfff5d0,
+      transparent: true,
+      opacity: 0.14,
+      depthWrite: false,
+    });
+    for (const xSign of [-1, 1]) {
+      const edge = new THREE.Mesh(new THREE.PlaneGeometry(0.10, PITCH_LEN * 0.85), edgeMat);
+      edge.rotation.x = -Math.PI / 2;
+      edge.position.set(xSign * 1.33, 0.005, MID_Z);
+      this.root.add(edge);
+    }
   }
 
   private buildCreases(): void {
@@ -397,9 +523,16 @@ export class StadiumEntity {
 
   private buildStands(): void {
     const sectionAngle = (Math.PI * 2) / STAND_SECTIONS;
-    const backMat = new THREE.MeshBasicMaterial({ color: 0xe7eef0 });
-    const seatMats = [0x74c9f6, 0xffcf57, 0x94d95f, 0xf5a0b5, 0xa8d8c0]
-      .map((color) => new THREE.MeshBasicMaterial({ color }));
+    const backMat = new THREE.MeshStandardMaterial({ color: 0xb4c8d8, roughness: 0.82, metalness: 0.0 });
+    // Controlled palette: deep blue + cyan + gold — no rainbow chaos
+    const seatMats = [0x0088cc, 0x00aaee, 0xf0a820, 0x0066aa]
+      .map((color) => new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.62,
+        metalness: 0.0,
+        emissive: color,
+        emissiveIntensity: 0.14,
+      }));
     const look = new THREE.Vector3();
 
     for (let s = 0; s < STAND_SECTIONS; s++) {
@@ -490,62 +623,13 @@ export class StadiumEntity {
             basePosition: mesh.position.clone(),
             scale,
             phase: rng(seed + 3) * Math.PI * 2,
+            angle: Math.atan2(pz - MID_Z, px),
           });
         }
       }
     }
   }
 
-  private buildSun(): void {
-    const sun = new THREE.Mesh(
-      new THREE.CircleGeometry(1.35, 24),
-      new THREE.MeshBasicMaterial({ color: 0xffdc62 }),
-    );
-    sun.position.set(12.5, 15.5, MID_Z - 28);
-    this.root.add(sun);
-
-    const glow = new THREE.Mesh(
-      new THREE.RingGeometry(1.5, 2.05, 24),
-      new THREE.MeshBasicMaterial({
-        color: 0xffef9f,
-        transparent: true,
-        opacity: 0.45,
-        side: THREE.DoubleSide,
-      }),
-    );
-    glow.position.copy(sun.position);
-    this.root.add(glow);
-  }
-
-  private buildClouds(assets: DoodleAssets): void {
-    const positions: [number, number, number][] = [
-      [-20, 22, -30],
-      [15, 25, -35],
-      [-8, 20, -25],
-      [25, 18, -20],
-      [-30, 24, -28],
-    ];
-
-    for (const [x, y, z] of positions) {
-      const mesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(12, 6),
-        new THREE.MeshBasicMaterial({
-          map: assets.cloud,
-          transparent: true,
-          alphaTest: 0.01,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        }),
-      );
-      mesh.position.set(x, y, z);
-      this.root.add(mesh);
-      this._clouds.push({
-        mesh,
-        basePosition: mesh.position.clone(),
-        phase: (x + y + z) * 0.1,
-      });
-    }
-  }
 
   private buildForegroundTufts(): void {
     const tuftMat = new THREE.MeshBasicMaterial({ color: 0xf0d24d });
@@ -567,10 +651,141 @@ export class StadiumEntity {
     }
   }
 
+  private buildFloodlightTowers(): void {
+    // Four corner towers — 2 behind bowler end, 2 near camera side
+    const towers: [number, number][] = [
+      [ 22, MID_Z - 22],
+      [-22, MID_Z - 22],
+      [ 20, MID_Z + 18],
+      [-20, MID_Z + 18],
+    ];
+
+    const poleMat  = new THREE.MeshStandardMaterial({ color: 0x9ab0be, roughness: 0.5, metalness: 0.35 });
+    const headGlow = new THREE.MeshBasicMaterial({ color: 0xfffbe8 });
+    const ringMat  = new THREE.MeshBasicMaterial({ color: 0xddddcc });
+    const haloMat  = new THREE.MeshBasicMaterial({
+      color: 0xfff5b0,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    });
+
+    for (const [tx, tz] of towers) {
+      // Vertical shaft
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.20, 24, 8), poleMat);
+      pole.position.set(tx, 12, tz);
+      this.root.add(pole);
+
+      // Horizontal arm at crown
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(5.0, 0.18, 0.18), poleMat);
+      arm.position.set(tx, 24.2, tz);
+      this.root.add(arm);
+
+      // 6 lamp heads along the arm
+      const lampCount = 6;
+      for (let li = 0; li < lampCount; li++) {
+        const lx = tx + (li / (lampCount - 1) - 0.5) * 4.4;
+        const ly = 24.2;
+
+        // Bright circle head
+        const head = new THREE.Mesh(new THREE.CircleGeometry(0.38, 10), headGlow);
+        head.position.set(lx, ly, tz);
+        head.lookAt(0, 3, MID_Z);
+        this.root.add(head);
+
+        // Outer ring
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.40, 0.52, 10), ringMat);
+        ring.position.set(lx, ly, tz);
+        ring.lookAt(0, 3, MID_Z);
+        this.root.add(ring);
+
+        // Soft glow halo
+        const halo = new THREE.Mesh(new THREE.CircleGeometry(0.78, 12), haloMat);
+        halo.position.set(lx, ly, tz);
+        halo.lookAt(0, 3, MID_Z);
+        this.root.add(halo);
+      }
+    }
+  }
+
+  private buildAtmosphericHaze(): void {
+    const haze = new THREE.Mesh(
+      new THREE.SphereGeometry(22, 24, 16),
+      new THREE.MeshBasicMaterial({
+        color: 0x040c22,
+        transparent: true,
+        opacity: 0.14,
+        depthWrite: false,
+        side: THREE.BackSide,
+      }),
+    );
+    haze.position.set(0, -2, MID_Z);
+    this.root.add(haze);
+  }
+
+  private buildStandRailings(): void {
+    const railMat = new THREE.MeshStandardMaterial({ color: 0xc8d4d8, roughness: 0.45, metalness: 0.20 });
+    const look = new THREE.Vector3();
+    const sectionAngle = (Math.PI * 2) / STAND_SECTIONS;
+
+    for (let s = 0; s < STAND_SECTIONS; s++) {
+      const angle = (s / STAND_SECTIONS) * Math.PI * 2;
+      if (Math.sin(angle) > SKIP_SIN_THRESHOLD) continue;
+
+      for (let tier = 0; tier < TIERS; tier++) {
+        const r = INNER_R + tier * TIER_STEP_R;
+        const py = (tier + 1) * TIER_STEP_H + 0.72;
+        const chordW = 2 * r * Math.tan(sectionAngle / 2) * 1.01;
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(chordW, 0.07, 0.07), railMat);
+        rail.position.set(Math.cos(angle) * r, py, MID_Z + Math.sin(angle) * r);
+        look.set(0, py, MID_Z);
+        rail.lookAt(look);
+        this.root.add(rail);
+      }
+    }
+  }
+
+  private buildCrowdBackdrop(): void {
+    const sectionAngle = (Math.PI * 2) / STAND_SECTIONS;
+    // Lower tier: warm amber / cyan / gold — 3 controlled colors, no rainbow chaos.
+    // Upper tier: near-black navy that bleeds into the night sky — creates stadium depth.
+    const lowerColors = [0xf09030, 0x22a8d0, 0xf0b828, 0x0a7acc];
+    const upperColor  = 0x061424;
+    const look = new THREE.Vector3();
+
+    for (let s = 0; s < STAND_SECTIONS; s++) {
+      const angle = (s / STAND_SECTIONS) * Math.PI * 2;
+      if (Math.sin(angle) > SKIP_SIN_THRESHOLD) continue;
+
+      const colorIdx = Math.floor(s / Math.ceil(STAND_SECTIONS / lowerColors.length)) % lowerColors.length;
+
+      for (let tier = 0; tier < TIERS; tier++) {
+        const isUpper = tier >= TIERS - 1;
+        const r = INNER_R + tier * TIER_STEP_R + 1.0;
+        const py = TIER_STEP_H + tier * TIER_STEP_H + 0.55;
+        const chordW = 2 * r * Math.tan(sectionAngle / 2) * 1.02;
+
+        const strip = new THREE.Mesh(
+          new THREE.PlaneGeometry(chordW, TIER_STEP_H * 0.88),
+          new THREE.MeshBasicMaterial({
+            color: isUpper ? upperColor : lowerColors[colorIdx]!,
+            transparent: true,
+            opacity: isUpper ? 0.72 : 0.84,  // upper fades toward sky
+            depthWrite: false,
+          }),
+        );
+        strip.position.set(Math.cos(angle) * r, py, MID_Z + Math.sin(angle) * r);
+        look.set(0, py, MID_Z);
+        strip.lookAt(look);
+        this.root.add(strip);
+      }
+    }
+  }
+
   private buildSponsorBoards(): void {
     for (const brand of SPONSORS) this._sponsorTextures.push(makeSponsorTexture(brand));
 
-    const boards = 16;
+    const boards = 8;
     const r = BOUNDARY_HOARDING.radius;
     for (let i = 0; i < boards; i++) {
       const angle = (i / boards) * Math.PI * 2;

@@ -1,0 +1,83 @@
+{
+  "game": {
+    "name": "Cricket Crash",
+    "version": "1.0.0",
+    "type": "crash",
+    "provider": "Cricket Crash Studios"
+  },
+  "math": {
+    "rtp": 0.9503,
+    "rtp_display": "95.03%",
+    "rtp_range": {
+      "min": 0.94,
+      "max": 0.96
+    },
+    "house_edge": 0.0497,
+    "volatility": "medium-high",
+    "hit_frequency": 0.85,
+    "max_win_multiplier": 200,
+    "max_single_ball_multiplier": 100,
+    "modes": {
+      "OVER": {
+        "balls_per_over": 6,
+        "outcomes": [
+          { "key": "six", "multiplier": 2.00, "weight": 0.05, "display": "Six (6 Runs)" },
+          { "key": "four", "multiplier": 1.75, "weight": 0.07, "display": "Four (4 Runs)" },
+          { "key": "triple", "multiplier": 1.36, "weight": 0.09, "display": "Triple (3 Runs)" },
+          { "key": "double", "multiplier": 1.16, "weight": 0.13, "display": "Double (2 Runs)" },
+          { "key": "single", "multiplier": 1.08, "weight": 0.15, "display": "Single (1 Run)" },
+          { "key": "dot", "multiplier": 0.90, "weight": 0.20, "display": "Dot Ball" },
+          { "key": "good_fielding", "multiplier": 0.70, "weight": 0.16, "display": "Good Fielding" },
+          { "key": "catch_out", "multiplier": 0.00, "weight": 0.15, "display": "Catch Out (Wicket)" }
+        ],
+        "sky_bonus": {
+          "chance_per_delivery": 0.02,
+          "types": [
+            { "type": "JETPACK", "multiplier": 10, "weight": 0.75 },
+            { "type": "SMALL_PLANE", "multiplier": 10, "weight": 0.22 },
+            { "type": "BIG_PLANE", "multiplier": 100, "weight": 0.03 }
+          ]
+        },
+        "streak_multipliers": {
+          "3_boundaries": 3,
+          "4_boundaries": 4,
+          "5_boundaries": 5,
+          "6_boundaries": 8
+        }
+      },
+      "POWERPLAY": {
+        "balls_per_round": 1,
+        "outcomes": [
+          { "key": "six", "multiplier": 2.25, "weight": 0.11, "display": "Six (6 Runs)" },
+          { "key": "four", "multiplier": 1.85, "weight": 0.15, "display": "Four (4 Runs)" },
+          { "key": "triple", "multiplier": 1.40, "weight": 0.11, "display": "Triple (3 Runs)" },
+          { "key": "double", "multiplier": 1.18, "weight": 0.16, "display": "Double (2 Runs)" },
+          { "key": "single", "multiplier": 1.08, "weight": 0.20, "display": "Single (1 Run)" },
+          { "key": "dot", "multiplier": 0.90, "weight": 0.15, "display": "Dot Ball" },
+          { "key": "good_fielding", "multiplier": 0.70, "weight": 0.03, "display": "Good Fielding" },
+          { "key": "catch_out", "multiplier": 0.00, "weight": 0.09, "display": "Catch Out (Wicket)" }
+        ],
+        "sky_bonus": {
+          "chance_per_delivery": 0.12,
+          "types": [
+            { "type": "JETPACK", "multiplier": 10, "weight": 0.75 },
+            { "type": "SMALL_PLANE", "multiplier": 10, "weight": 0.22 },
+            { "type": "BIG_PLANE", "multiplier": 100, "weight": 0.03 }
+          ]
+        }
+      }
+    }
+  },
+  "legal": {
+    "disclaimers": [
+      "Malfunctions void all pays and plays.",
+      "A stable internet connection is required.",
+      "The RTP (Return to Player) of this game is 95.03%.",
+      "Maximum win per round is capped at 200x the bet amount.",
+      "All game outcomes are determined by the Stake RGS.",
+      "Players must be of legal gambling age in their jurisdiction.",
+      "Unauthorized reproduction or distribution is prohibited."
+    ],
+    "copyright": "© 2026 Cricket Crash. All rights reserved."
+  }
+}

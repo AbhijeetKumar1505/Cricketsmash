@@ -64,14 +64,26 @@ engine/
   systems/                   ECS-style subsystems (BallSystem, HitSystem, AnimationSystem, …)
   rng/OutcomeSystem.ts       Maps DeliveryOutcome → physics ShotResult
   arena/                     Procedural stadium helpers (lighting, spectators, shaders, banners)
-  objects/                   Mesh primitives (players, ball, pitch, stumps, sky)
-  animations/                Delivery animation sequences (bowling, hitting, wicket)
-  animation/playerAnimator.ts  Skeletal blink/pose animator
+  objects/                   Mesh primitives (ball, pitch, stumps, sky)
   constants.ts               ALL magic numbers (world coords, physics params, timings)
 render/
   Renderer.ts                Three.js WebGL renderer; owns Scene, Camera, DoodleAssets, entities
   entities/                  Ball, Stadium — scene objects with update/setSnapshot API
   doodle/                    DoodleAssets loader, SpriteCharacter
+characters/human/            Full procedural human pipeline (PUBLIC API: HumanCharacter)
+  proportions.ts             6.5-head stylized ratios, role overrides
+  HumanSkeleton.ts           Rig: Root→Pelvis→Spine_01/02/Chest→Neck→Head + Clavicles + Hand rig + Toe
+  HumanBodyMesh.ts           Builds SkinnedMesh + kit attachments
+  HumanAnimator.ts           Thin facade over AnimationStack per character
+  HumanCharacter.ts          Wraps skeleton, mesh, contact shadow, lighting
+  skinning/                  buildBodyGeometry / computeVertexWeights / kitAttachments
+  animation/                 AnimationStack + layers (Base / Additive / Mechanics / Aim / Reaction / Bat / IK) + poses/
+  controllers/               CharacterController FSM + per-role specializations (Batsman/Bowler/Fielder/Keeper)
+  mechanics/                 WeightTransfer / SpineDynamics / ShoulderRoll
+  bat/                       BatRig (kinetic chain) + BatContact (impact response)
+  ik/                        TwoBoneIK + FootGroundingIK + BatTargetIK
+  render/                    HumanMaterials / HumanLighting (rim+bounce) / ContactShadow
+  lod/                       HumanLOD (3 tiers) + AccessoryInstancing (fielder kits)
 lib/
   CricketSimulation.svelte   Canvas host; mounts EngineBridge + ResizeObserver
   GameArena.svelte           Stadium chrome, HUD, multiplier (CSS 2.5D overlay)
@@ -142,7 +154,7 @@ Redis is **optional**: falls back to no-op pub-sub if `REDIS_URL` is absent.
 - **`gameController.svelte.ts`** — main reactive store and Stake coordinator; consumes bridge callbacks (`onHitResult`, `onMultiplier`, etc.). `bindBridge(b)` wires callbacks after the canvas mounts.
 - **`stakeClient.ts`** and **`modeEngine.ts`** are the only files that touch Stake API and delivery sequencing — change these when modifying game logic.
 - **Three.js coordinate system** — crease along **+Z**, pitch length along **+X**; Y = height. Key values in `engine/constants.ts`: bowler at Z ≈ −9, batsman at Z ≈ 0, bat contact height Y ≈ 0.85.
-- **Player visuals (doodle, stability-first)** — face is entirely **local and static**: no ball/head/eye tracking, no `lookAt` on facial features; optional deterministic **blink** only scales `eyePivots` in `playerAnimator.ts`. Root **yaw** is set in `Renderer.ts` (`setYawToTarget` with per-role yaw offset).
+- **Player visuals (stylized esports athlete pipeline)** — characters are built procedurally under `apps/frontend/src/characters/human/`: 6.5-head proportions, single `SkinnedMesh` body with proximity-weighted vertices, rigid kit attachments parented to bones, stylized PBR materials with shader-injected rim light + green ground bounce. Per-role `CharacterController` FSMs (`Idle/Ready/React/Execute/Recover`) translate `EngineSnapshot` into a layered animation stack (Base / Additive / Mechanics / Aim / Reaction / Bat / IK). The face is entirely **local and static**: no ball/head/eye tracking, no `lookAt` on facial features; optional deterministic **blink** only. Root **yaw** is set in `Renderer.ts` (`setYawToTarget` with per-role yaw offset). Three close characters (batsman/bowler/keeper) + 10 fielders render with `HumanLOD` distance tiers; fielders rely on `ContactShadow` planes instead of real shadow casters.
 - **CSS 2.5D** (`GameArena.svelte`) — stadium chrome, HUD, multiplier. There is **no fixed top HUD strip** (removed for maximum viewport / sky): currency label, formatted **balance**, and **audio toggle** live in **`GamePage.svelte`** footer (`bottom-bar`, left cluster).
 - **Web Audio API** (`gameAudio.ts`) — gameplay sounds via synthesis; no static audio files needed (except `gameBGsound.mpeg`).
 - **Legacy:** `CricketStage.svelte` (Pixi) remains in-repo but is **not** wired into the main app.

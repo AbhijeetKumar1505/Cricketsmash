@@ -1,19 +1,31 @@
 import * as THREE from 'three';
 import type { EngineSnapshot } from '../engine/GameEngine.js';
+import { GameState } from '../engine/state/StateMachine.js';
 import type { FielderSlot } from '../engine/worldLayout.js';
 import {
   BATSMAN_CREASE_Z,
   BOWLER_RELEASE_Z,
   BOWLER_RUN_START_Z,
   FIELDER_SLOTS,
+  fielderStanceClassForName,
+  broadcastHierarchyFielderScale,
   getDepthScale,
   getFielderDepthScale,
   PITCH_MID_Z,
+  sampleFielderIdleLookPoint,
 } from '../engine/worldLayout.js';
-import { animateBatsman, animateBowler, animateFielder } from '../engine/animation/playerAnimator.js';
-import type { SimPhase, BowlerType } from '../engine/physics/ballTrajectory.js';
-import type { ShotType } from '../core/modeEngine.js';
-import { createBatsmanFigure, createBowlerFigure, createFielderFigure } from '../engine/objects/players.js';
+import type { SimPhase } from '../engine/physics/ballTrajectory.js';
+import { HumanCharacter } from '../characters/human/HumanCharacter.js';
+import {
+  animateHumanBatsman,
+  animateHumanBowler,
+  animateHumanFielder,
+  type AnimatorInput,
+} from '../characters/human/HumanAnimator.js';
+import { BatsmanController } from '../characters/human/controllers/BatsmanController.js';
+import { BowlerController }  from '../characters/human/controllers/BowlerController.js';
+import { FielderController } from '../characters/human/controllers/FielderController.js';
+import { HumanLOD }          from '../characters/human/lod/HumanLOD.js';
 import { DoodleAssets } from './doodle/DoodleAssets.js';
 import { Scene } from './Scene.js';
 import { Camera } from './Camera.js';
@@ -23,7 +35,6 @@ import { BonusObject3D } from './entities/BonusObject3D.js';
 import { SkyObject3D } from './entities/SkyObject3D.js';
 import { ImpactJuice } from './effects/ImpactJuice.js';
 import type { Renderable } from '../engine/loop/GameLoop.js';
-import type { AnimatorInput } from '../engine/animation/playerAnimator.js';
 
 function lerpAngle(current: number, target: number, t: number): number {
   const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
@@ -35,11 +46,6 @@ function setYawToTarget(root: THREE.Group, target: THREE.Vector3, smooth = 1, ya
   const dz = target.z - root.position.z;
   const targetYaw = Math.atan2(dx, dz) + yawOffset;
   root.rotation.y = lerpAngle(root.rotation.y, targetYaw, smooth);
-}
-
-function depthLiftFor(z: number): number {
-  const depth = Math.max(0, BATSMAN_CREASE_Z - z);
-  return depth * 0.015;
 }
 
 // Keep badge system for future debugging/mapping, but off for normal gameplay.
@@ -88,9 +94,14 @@ export class Renderer implements Renderable {
   private readonly cam: Camera;
   private readonly assets: DoodleAssets;
   private readonly ball: BallEntity;
-  private readonly batsmanFig: THREE.Group;
-  private readonly bowlerFig: THREE.Group;
-  private readonly fielders: Array<{ fig: THREE.Group; slot: FielderSlot }>;
+  private readonly batsmanChar: HumanCharacter;
+  private readonly bowlerChar: HumanCharacter;
+  private readonly fielders: Array<{ char: HumanCharacter; slot: FielderSlot; ctrl: FielderController; lod: HumanLOD }>;
+  private readonly batsmanCtrl: BatsmanController;
+  private readonly bowlerCtrl:  BowlerController;
+  private readonly batsmanLOD: HumanLOD;
+  private readonly bowlerLOD:  HumanLOD;
+  private readonly _bowlerBall: THREE.Mesh;
   private readonly stadium: StadiumEntity;
   private readonly impactJuice = new ImpactJuice();
   private readonly fielderBadgeTextures: THREE.CanvasTexture[] = [];
@@ -104,12 +115,21 @@ export class Renderer implements Renderable {
   private readonly debugLanding: THREE.Mesh;
   private readonly debugSkyTarget: THREE.Mesh;
   private readonly debugArc: THREE.Line;
+  private readonly _fielderIdleLook = new THREE.Vector3();
 
   private snapshot: EngineSnapshot | null = null;
   private _lastTime = 0;
   private _time = 0;
 
-  constructor(canvas: HTMLCanvasElement, width: number, height: number, options: { debug?: boolean } = {}) {
+  /** Prior frame snapshot slice for stadium LED / crowd spectacle edge triggers. */
+  private _stadiumAtmoPrev: {
+    outcome: EngineSnapshot['round']['outcome'];
+    hitQuality: string;
+    phase: string;
+    ballElapsed: number;
+  } | null = null;
+
+  constructor(canvas: HTMLCanvasElement, width: number, height: number, options: { debug?: boolean; batsmanAvatarId?: string } = {}) {
     this.debugEnabled = options.debug ?? false;
     this.gl = new THREE.WebGLRenderer({
       canvas,
@@ -121,46 +141,58 @@ export class Renderer implements Renderable {
     this.gl.setSize(width, height);
     this.gl.setPixelRatio(Math.min(2, window.devicePixelRatio));
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
-    this.gl.toneMapping = THREE.NoToneMapping;
-    this.gl.toneMappingExposure = 1.0;
-    this.gl.shadowMap.enabled = false;
+    this.gl.toneMapping = THREE.ACESFilmicToneMapping;
+    this.gl.toneMappingExposure = 1.05;
+    // M7: enable shadow map for close characters (batsman/bowler).
+    // Fielders rely on the ContactShadow plane instead — bounded cost.
+    this.gl.shadowMap.enabled = true;
+    this.gl.shadowMap.type    = THREE.PCFSoftShadowMap;
 
     this.assets = new DoodleAssets();
     this.scene = new Scene();
     this.cam = new Camera(width / height);
 
     this.stadium = new StadiumEntity(this.assets);
-    this.bowlerFig = createBowlerFigure(0);
-    this.batsmanFig = createBatsmanFigure();
+    this.bowlerChar  = new HumanCharacter('bowler');
+    this.batsmanChar = new HumanCharacter('batsman', options.batsmanAvatarId);
     this.ball = new BallEntity(this.assets);
 
+    const bBallGeo = new THREE.SphereGeometry(0.044, 12, 8);
+    const bBallMat = new THREE.MeshStandardMaterial({ color: 0xcc2020, roughness: 0.72, metalness: 0.0 });
+    this._bowlerBall = new THREE.Mesh(bBallGeo, bBallMat);
+    this._bowlerBall.position.set(0.01, -0.06, 0.05);
+    this.bowlerChar.bones.handR.add(this._bowlerBall);
+
+    this.batsmanCtrl = new BatsmanController(this.batsmanChar);
+    this.bowlerCtrl  = new BowlerController(this.bowlerChar);
+    this.batsmanLOD  = new HumanLOD(this.batsmanChar);
+    this.bowlerLOD   = new HumanLOD(this.bowlerChar);
+
     this.scene.add(this.stadium.root);
-    const boundaryGlow = new THREE.Mesh(
-      new THREE.RingGeometry(18.5, 19.2, 72),
-      new THREE.MeshBasicMaterial({ color: 0x8bf7b3, transparent: true, opacity: 0.2, side: THREE.DoubleSide }),
-    );
-    boundaryGlow.rotation.x = -Math.PI / 2;
-    boundaryGlow.position.set(0, 0.03, -7);
-    this.scene.add(boundaryGlow);
-    this.scene.add(this.bowlerFig);
-    this.scene.add(this.batsmanFig);
+    this.scene.add(this.bowlerChar.root);
+    this.scene.add(this.batsmanChar.root);
+    const stanceForIdx = ['crouch', 'athletic', 'deep', 'lean'] as const;
     this.fielders = FIELDER_SLOTS.map((slot, i) => {
-      const fig = createFielderFigure(i);
-      fig.userData.idlePhase = i * 0.55;
-      fig.userData.poseType = i % 3;
-      // Deterministic micro-variation so outfielders are not copy-paste clones.
-      fig.userData.fieldYawJitter = THREE.MathUtils.degToRad(Math.sin(i * 1.731 + 0.2) * 6);
-      fig.userData.fieldXJitter = Math.cos(i * 2.419 + 0.7) * 0.1;
+      const char = new HumanCharacter('fielder');
+      char.idlePhase          = i * 0.55;
+      char.fieldStanceClass   = fielderStanceClassForName(slot.name);
+      char.poseType           = i % 3;
+      char.fieldYawJitter     = THREE.MathUtils.degToRad(Math.sin(i * 1.731 + 0.2) * 6);
+      const closeSlot = slot.name === 'slip' || slot.name === 'gully' || slot.name === 'short_leg';
+      char.fieldXJitter = Math.cos(i * 2.419 + 0.7) * (closeSlot ? 0.035 : 0.09);
       if (SHOW_FIELDER_NUMBERS) {
         const badge = createFielderNumberBadge(i + 1);
         this.fielderBadgeTextures.push(badge.texture);
         this.fielderBadgeMaterials.push(badge.sprite.material as THREE.SpriteMaterial);
-        const bodyRoot = fig.userData.bodyRoot as THREE.Group | undefined;
-        (bodyRoot ?? fig).add(badge.sprite);
+        badge.sprite.position.set(0, 2.2, 0.08);
+        char.scaleGroup.add(badge.sprite);
       }
-      return { fig, slot };
+      const stance = stanceForIdx[char.fieldStanceClass] ?? 'athletic';
+      const ctrl   = new FielderController(char, stance, i);
+      const lod    = new HumanLOD(char);
+      return { char, slot, ctrl, lod };
     });
-    for (const f of this.fielders) this.scene.add(f.fig);
+    for (const f of this.fielders) this.scene.add(f.char.root);
     this.scene.add(this.ball.root);
 
     this.debugRoot = new THREE.Group();
@@ -198,8 +230,16 @@ export class Renderer implements Renderable {
     this.impactJuice.update(dt);
     const scaledDt = dt * this.impactJuice.timeScale;
     this._time += scaledDt;
+    this.scene.updateEnvironment(this._time);
 
-    this.stadium.updateAnimations(scaledDt, this.cam.three);
+    const phaseForStadium = this.snapshot?.phase ?? GameState.IDLE;
+    if (this.snapshot) this.updateStadiumAtmosphere(this.snapshot);
+    this.stadium.updateAnimations(scaledDt, this.cam.three, phaseForStadium);
+
+    // LOD tier selection — close characters get full pipeline, far fielders
+    // get the lightweight tier (less reaction + frozen frustum-culled meshes).
+    this.batsmanLOD.update(this.cam.three);
+    this.bowlerLOD.update(this.cam.three);
 
     if (!this.snapshot) {
       this.gl.render(this.scene.three, this.cam.three);
@@ -213,101 +253,83 @@ export class Renderer implements Renderable {
       ? new THREE.Vector3(ball.x, ball.y, ball.z)
       : new THREE.Vector3(0, 1.0, PITCH_MID_Z);
 
-    // Position + yaw so each primitive "root" faces its attention target.
-    const bowlerZ = THREE.MathUtils.lerp(BOWLER_RUN_START_Z, BOWLER_RELEASE_Z, bowler.runT);
+    // Position + yaw so each character root faces its attention target.
+    // Bowler: slight lateral offset (natural bowling lane), farther back for depth
+    const bowlerZ  = THREE.MathUtils.lerp(BOWLER_RUN_START_Z, BOWLER_RELEASE_Z, bowler.runT) - 0.4;
     const batsmanZ = BATSMAN_CREASE_Z;
-    this.bowlerFig.position.set(0, depthLiftFor(bowlerZ) + 0.12, bowlerZ);
-    setYawToTarget(this.bowlerFig, this.batsmanFig.position, 0.18, 0);
-    const bowlerDepth = getDepthScale(bowlerZ);
-    const bowlerScalePivot = this.bowlerFig.userData.scalePivot as THREE.Group | undefined;
-    (bowlerScalePivot ?? this.bowlerFig).scale.setScalar(bowlerDepth);
 
-    this.batsmanFig.position.set(0.08, -0.29, batsmanZ - 0.68);
-    setYawToTarget(this.batsmanFig, this.bowlerFig.position, 0.2, 3 * Math.PI / 2);
-    const batsmanScalePivot = this.batsmanFig.userData.scalePivot as THREE.Group | undefined;
-    (batsmanScalePivot ?? this.batsmanFig).scale.setScalar(getDepthScale(batsmanZ));
+    this.bowlerChar.root.position.set(0.14, 0, bowlerZ);  // X offset: natural bowling lane
+    setYawToTarget(this.bowlerChar.root, this.batsmanChar.root.position, 0.18, 0);
+    this.bowlerChar.scaleGroup.scale.setScalar(getDepthScale(bowlerZ) * 1.24 * 1.02);
 
-    // Bowler animation
-    const bowlerSimPhase: SimPhase = bowler.phase === 'run' ? 'bowl' : 'idle';
-    const bowlerInput: AnimatorInput = {
-      phase: bowlerSimPhase,
-      phaseProgress: THREE.MathUtils.clamp(bowler.runT, 0, 1),
-      bowlerType: 'Fast' as BowlerType,
-      shotType: 'defend' as ShotType,
-      dt: scaledDt,
-      time: this._time,
-      ballPos,
-    };
-    animateBowler(this.bowlerFig, bowlerInput);
+    // Batsman: clear separation from wicket (forward of stumps), slight lateral for RH stance
+    this.batsmanChar.root.position.set(0.12, 0, batsmanZ - 0.24);  // Z: forward of wicket at 0.6
+    setYawToTarget(this.batsmanChar.root, this.bowlerChar.root.position, 0.2, 3 * Math.PI / 2);
+    this.batsmanChar.scaleGroup.scale.setScalar(getDepthScale(batsmanZ) * 1.32 * 1.06);
 
-    // Batsman animation mapping:
-    // - idle + ball-in-flight => pre-swing "bowl"
-    // - swing => "hit" (impact visuals)
-    // - stumped/celebrate => wicket/celebrate
-    let batsmanSimPhase: SimPhase = 'idle';
-    let batsmanPP = 0;
-    if (batsman.phase === 'celebrate') {
-      batsmanSimPhase = 'celebrate';
-    } else if (batsman.phase === 'stumped') {
-      batsmanSimPhase = 'wicket';
-    } else if (batsman.phase === 'swing') {
-      batsmanSimPhase = 'hit';
-      const t = THREE.MathUtils.clamp(
-        (batsman.swingAngle - -1.1) / (2.7 - -1.1),
-        0,
-        1,
-      );
-      // Drive impact stretch early in the hit phase.
-      batsmanPP = t * 0.22;
-    } else {
-      // batsman.phase === 'idle' or 'run'
-      const ballInFlight = this.snapshot.phase === 'BALL_TRAVEL' || this.snapshot.phase === 'HIT';
-      batsmanSimPhase = ballInFlight ? 'bowl' : 'idle';
-      batsmanPP = ballInFlight
-        ? THREE.MathUtils.clamp(ball.elapsed / (ball.params?.hitTime ?? 1.1), 0, 1)
-        : 0;
+    // Build snapshot-driven AnimatorInputs via the per-role CharacterController FSMs.
+    // No more hardcoded 'Fast' / 'defend' / 'none' — snapshot now carries intent.
+    const ctrlInput = { snapshot: this.snapshot, time: this._time, dt: scaledDt };
+
+    // Bowler
+    const bowlerInput: AnimatorInput = this.bowlerCtrl.update(ctrlInput);
+    bowlerInput.ballPos = ballPos;
+    animateHumanBowler(this.bowlerChar, bowlerInput);
+    this._bowlerBall.visible = bowlerInput.phase === 'idle';
+
+    // Batsman
+    const batsmanInput: AnimatorInput = this.batsmanCtrl.update(ctrlInput);
+    batsmanInput.ballPos = ballPos;
+    batsmanInput.stanceFocusWorld = this.bowlerChar.root.position;
+    // Drive base phaseProgress from the engine when actively swinging or in-flight,
+    // so layered animations still respect the existing timing curve.
+    if (batsman.phase === 'swing') {
+      batsmanInput.phaseProgress = THREE.MathUtils.clamp((batsman.swingAngle - -1.1) / (2.7 - -1.1), 0, 1) * 0.22;
+    } else if (this.snapshot.phase === 'BALL_TRAVEL' || this.snapshot.phase === 'HIT') {
+      batsmanInput.phaseProgress = THREE.MathUtils.clamp(ball.elapsed / (ball.params?.hitTime ?? 1.1), 0, 1);
     }
+    animateHumanBatsman(this.batsmanChar, batsmanInput);
 
-    const batsmanInput: AnimatorInput = {
-      phase: batsmanSimPhase,
-      phaseProgress: batsmanPP,
-      bowlerType: 'Fast' as BowlerType,
-      shotType: 'defend' as ShotType,
-      dt: scaledDt,
-      time: this._time,
-      ballPos,
-      isSwinging: this.snapshot.phase === 'HIT' || batsman.phase === 'swing',
-      hitQuality: 'none',
-    };
-    animateBatsman(this.batsmanFig, batsmanInput);
-
-    // Fielders — position and animate from per-fielder snapshot state
+    // Fielders
     for (let i = 0; i < this.fielders.length; i++) {
-      const { fig, slot } = this.fielders[i];
+      const { char, slot, ctrl, lod } = this.fielders[i];
       const fState = this.snapshot.fielders[i];
+      lod.update(this.cam.three);
 
-      const xJ = (fig.userData.fieldXJitter as number | undefined) ?? 0;
-      const yJ = (fig.userData.fieldYawJitter as number | undefined) ?? 0;
+      const posX = fState.phase === 'idle' ? slot.x + char.fieldXJitter : fState.x;
+      const posZ = fState.phase === 'idle' ? slot.z                      : fState.z;
 
-      // Idle fielders keep slot + micro-jitter; active fielder tracks live position
-      const posX = fState.phase === 'idle' ? slot.x + xJ : fState.x;
-      const posZ = fState.phase === 'idle' ? slot.z       : fState.z;
+      char.root.position.set(posX, 0, posZ);
 
-      fig.position.set(posX, depthLiftFor(posZ), posZ);
+      const batRoot = this.batsmanChar.root.position;
+      if (fState.phase === 'chase') {
+        setYawToTarget(char.root, ballPos, 0.25, char.fieldYawJitter);
+      } else {
+        sampleFielderIdleLookPoint(slot.name, batRoot.x, batRoot.y, batRoot.z, this._fielderIdleLook);
+        setYawToTarget(char.root, this._fielderIdleLook, 0.14, char.fieldYawJitter);
+      }
 
-      // Chase: face the ball; idle/gather: face the batsman
-      const lookTarget = fState.phase === 'chase' ? ballPos : this.batsmanFig.position;
-      setYawToTarget(fig, lookTarget, fState.phase === 'chase' ? 0.25 : 0.12, yJ);
+      char.scaleGroup.scale.setScalar(
+        getFielderDepthScale(posZ) * slot.silhouetteScale * 1.24 * broadcastHierarchyFielderScale(slot.name),
+      );
 
-      const depth = getFielderDepthScale(posZ);
-      const composedScale = depth * slot.silhouetteScale;
-      const scalePivot = fig.userData.scalePivot as THREE.Group | undefined;
-      (scalePivot ?? fig).scale.setScalar(composedScale);
-
+      // Controller-driven AnimatorInput; the local chase/gather override is still
+      // applied here because BallSystem owns the immediate per-frame fielder phase.
+      const fInput = ctrl.update(ctrlInput);
+      fInput.ballPos = ballPos;
       const animPhase: SimPhase =
         fState.phase === 'chase'  ? 'bowl' :
-        fState.phase === 'gather' ? 'hit'  : 'idle';
-      animateFielder(fig, ballPos, this._time, scaledDt, animPhase);
+        fState.phase === 'gather' ? 'hit'  : fInput.phase;
+      const presenceW = THREE.MathUtils.clamp(1.12 - Math.abs(posZ - BATSMAN_CREASE_Z) * 0.026, 0.32, 1);
+      animateHumanFielder(
+        char,
+        ballPos,
+        this._time,
+        scaledDt,
+        animPhase,
+        presenceW,
+        fInput.fieldGatherBlend ?? 0,
+      );
     }
 
     this.syncBonusObjects();
@@ -333,16 +355,63 @@ export class Renderer implements Renderable {
     this.gl.render(this.scene.three, this.cam.three);
   }
 
+  private updateStadiumAtmosphere(snap: EngineSnapshot): void {
+    const prev = this._stadiumAtmoPrev;
+    const curOutcome = snap.round.outcome;
+    const curQ = snap.feedback.hitQuality ?? 'none';
+
+    if (prev) {
+      if (prev.outcome === null && curOutcome !== null) {
+        if (curOutcome === 'wicket') {
+          if (curQ === 'miss') this.stadium.onDeliverySpectacle('miss');
+          else this.stadium.onDeliverySpectacle('wicket');
+        } else if (curOutcome === 'hit') {
+          const st = snap.batsman.shotType;
+          if (st === 'loft') this.stadium.onDeliverySpectacle('six');
+          else if (st === 'cut') this.stadium.onDeliverySpectacle('four');
+          else if (st === 'pull') {
+            const sixGuess = snap.round.targetMult >= 3.5;
+            this.stadium.onDeliverySpectacle(sixGuess ? 'six' : 'four');
+          }
+          this.impactJuice.triggerHitImpact();
+        }
+      }
+      if (
+        prev.phase !== GameState.BOWLER_RUNUP &&
+        snap.phase === GameState.BOWLER_RUNUP &&
+        snap.round.ballNumber === 1
+      ) {
+        this.stadium.onSessionPlayStart();
+      }
+    }
+
+    const exc = Math.min(1, Math.log(1 + Math.max(0, snap.round.cumulative)) / Math.log(24));
+    this.stadium.setLivingExcitement(exc);
+
+    this._stadiumAtmoPrev = {
+      outcome: curOutcome,
+      hitQuality: curQ,
+      phase: snap.phase,
+      ballElapsed: snap.ball.elapsed,
+    };
+  }
+
   resize(width: number, height: number): void {
     this.gl.setSize(width, height);
     this.cam.resize(width / height);
+  }
+
+  setAutobetFraming(active: boolean): void {
+    this.cam.setSessionPullZ(active ? 2.35 : 0);
   }
 
   dispose(): void {
     this.gl.dispose();
     this.ball.dispose();
     this.stadium.dispose();
-    // Primitives: nothing to dispose yet (materials are created once per rig).
+    this.batsmanChar.dispose();
+    this.bowlerChar.dispose();
+    for (const f of this.fielders) f.char.dispose();
     for (const mat of this.fielderBadgeMaterials) mat.dispose();
     for (const tex of this.fielderBadgeTextures) tex.dispose();
     for (const mesh of this.bonusMeshes.values()) mesh.dispose();
