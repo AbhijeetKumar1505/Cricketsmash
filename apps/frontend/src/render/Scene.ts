@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { PITCH_MID_Z } from '../engine/worldLayout.js';
 
-// Clear summer day — bright sky dome (shader clouds + sun disc), warm sun key, soft fills.
+// Bright daylight stadium dome with warm sun key — Crystal Gold UI stays on top.
 
-const SKY_BG = 0xb8dcff;
+const SKY_BG = 0xc8e6ff;
 
 const SKY_VERTEX = `
   varying vec3 vWorldPos;
@@ -65,7 +65,7 @@ const SKY_FRAGMENT = `
     cf = cf * 0.55 + cf2 * 0.45;
     cf = smoothstep(0.36, 0.88, cf);
     vec3 cloudCol = vec3(0.99, 0.995, 1.0);
-    color = mix(color, cloudCol, cf * 0.58);
+    color = mix(color, cloudCol, cf * 0.55);
 
     vec3 dir = normalize(vWorldPos);
     float sunDot = max(dot(dir, uSunDir), 0.0);
@@ -84,7 +84,7 @@ export class Scene {
   constructor() {
     this.three = new THREE.Scene();
     this.three.background = new THREE.Color(SKY_BG);
-    // Soft aerial perspective — light blue, pushed back so stands read clearly.
+    // Bright daytime aerial perspective — light blue fog softens the boundary stands.
     this.three.fog = new THREE.Fog(0xc9e8ff, 42, 155);
 
     const sunPos = new THREE.Vector3(-38, 76, -30);
@@ -92,9 +92,10 @@ export class Scene {
 
     const hemi = new THREE.HemisphereLight(0x7ec8ff, 0xd4ebd4, 0.62);
     hemi.position.set(0, 80, 0);
-    const ambient = new THREE.AmbientLight(0xffffff, 0.46);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.50);
 
-    const sun = new THREE.DirectionalLight(0xfff2dd, 2.35);
+    // Bright sun key — natural daylight on the field
+    const sun = new THREE.DirectionalLight(0xfff2dd, 2.45);
     sun.position.copy(sunPos);
     sun.target.position.set(0, 0.5, PITCH_MID_Z);
     this.three.add(sun.target);
@@ -102,7 +103,7 @@ export class Scene {
     const fillCool = new THREE.DirectionalLight(0xe3f0ff, 0.42);
     fillCool.position.set(28, 36, 22);
 
-    const fillWarm = new THREE.DirectionalLight(0xffefd2, 0.28);
+    const fillWarm = new THREE.DirectionalLight(0xffefd2, 0.30);
     fillWarm.position.set(14, 22, PITCH_MID_Z + 26);
 
     const bounce = new THREE.DirectionalLight(0x6ccd7a, 0.22);
@@ -115,9 +116,9 @@ export class Scene {
       uniforms: {
         uTime: { value: 0 },
         uSunDir: { value: sunDir.clone() },
-        uZenith: { value: new THREE.Color(0x5eb0f0) },
-        uMid: { value: new THREE.Color(0x8ecfff) },
-        uHorizon: { value: new THREE.Color(0xe8f4ff) },
+        uZenith:  { value: new THREE.Color(0x2e8fee) },
+        uMid:     { value: new THREE.Color(0x6cc4ff) },
+        uHorizon: { value: new THREE.Color(0xfff0c8) },
       },
       vertexShader: SKY_VERTEX,
       fragmentShader: SKY_FRAGMENT,

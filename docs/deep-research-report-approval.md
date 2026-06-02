@@ -1,0 +1,84 @@
+# Executive Summary  
+Stake Engine’s developer documentation includes an **Approval Guidelines** section outlining how games are submitted and reviewed for publication on the Stake platform【59†L1-L1】.  The guidelines cover various technical and content requirements (e.g. asset rules, security, localization, jurisdictional compliance), but they are dispersed across multiple pages and lack clear process structure.  Key findings are: developers must submit a game build with a promotional blurb and metadata, use only unique static assets loaded via Stake’s CDN, follow a strict XSS/static-file policy, and comply with language/jurisdiction rules【59†L1-L1】【20†L1-L1】.  However, roles beyond the developer and “technical support” reviewer are undefined, and timelines or escalation steps are not specified.  We identify inconsistencies and gaps (summarised below) that create risk of delay or non‐compliance.  Our recommendations include consolidating all criteria into a single checklist, clarifying each stakeholder’s responsibilities, defining clear decision steps and turnaround times, and formalising an escalation/feedback loop.  We propose a standardised submission checklist (see below) and a simplified approval workflow (diagram) to ensure consistency and efficiency.  A prioritized action plan assigns effort and impact to each improvement initiative.
+
+## Key Findings 
+- **Submission Requirements:** The documentation specifies that each game **submission** must include a **short blurb** describing the game’s theme and mechanics for promotional use (the “game description” tag)【59†L1-L1】.  It also implies that appropriate metadata (title, category, etc.) be provided, although a consolidated checklist is not clearly given.  In practice, no explicit timeline or submission procedure (dashboard vs email) is stated, leading to uncertainty in process flow.  
+- **Technical Review:** *“Stake Engine technical support will review [the game’s] suitability for publication”*【59†L1-L1】.  This suggests the Support team performs an initial review, but there is no formal mention of additional roles (e.g. QA testers, content approvers) or a second‐level approval.  Responsibility for final go/no‐go decisions is not fully documented, and no service‐level targets (e.g. “games reviewed within X days”) are given.
+- **Asset Requirements:** Front‐end guidelines insist on **unique audio/visual assets** – developers cannot reuse sample-game art or music【20†L1-L1】.  Furthermore, *all images and fonts* must be served from Stake Engine’s Content Delivery Network (CDN)【20†L1-L1】.  These rules enforce consistency and security, but they are split across “Front End Communication” and “RGS Communication” pages, causing some duplication (e.g. the XSS/static asset rule appears in multiple sections).  
+- **Security (XSS/Static Files):** The documentation enforces a *strict XSS policy*: games may only use static files and *must not load resources from any external source*【24†L1-L1】.  This covers fonts, APIs, analytics, etc.  It explicitly calls out common pitfalls (e.g. downloading fonts from external servers causes console errors and rejection).  While robust, the policy is only stated in one place and could benefit from centralisation in a checklist to ensure developers see it.  
+- **Game Engine Communication:** For the remote game server (RGS) connection, games **must use the provided `rgs_url` query parameter** to determine the server to call【28†L1-L3】.  Currency and language handling is addressed: *English is the only required language*, meaning the default UI/rules should be in English (other languages are optional and testable via a “social mode” setting mentioned elsewhere).  Details like session timeouts or error handling are not explicitly documented, which may lead to varying developer implementations.  
+- **Localization & Jurisdiction:** A dedicated section on **Jurisdiction Requirements** notes that games intended for the US (stake.us) must avoid certain gambling terms in rules/UI【58†L1-L1】.  This applies primarily to rule texts and possibly UI labels, but the guidance is high-level and specific to the US.  No guidance is given for other jurisdictions or a general legal review (e.g. EU regulations, age ratings, etc.).  The guidelines do mention a “social mode” for testing languages and suggest providing post-release notes, but how these fit into the approval flow is unclear.  
+- **Game Functionality (Replay/Math):** The docs refer to “Game Replay Requirements” and “Math Verification” sections, implying that submitted games must be provably fair and correctly simulated【51†L1-L3】.  Although we cannot retrieve the full text, it is likely that developers must supply the game logic in a prescribed format and demonstrate via test simulations that payouts match expectations.  However, specific thresholds or tools (e.g. how many spins to simulate, pass criteria) are not summarised in one place, which could confuse developers on the rigor needed.  
+- **Quality Standards:** The “Game Quality Rankings” category suggests there is a grading or scoring system for games (e.g. prioritising high-quality content)【51†L1-L3】.  Details are not shown here, but presumably each game is assessed on audio/visual polish, innovation, etc.  How this ranking influences approval (e.g. faster review for higher rankings or a cutoff for acceptable quality) is not explained.  
+- **Documentation & Media:** Besides the blurb, there is no explicit list of other required documents.  Likely needed items (not explicitly mentioned) include game rules and volatility table, RTP value, screenshots, and a release notes document.  The snippets suggest a “Post Release Notes” step, but it may refer to internal updates after launch rather than initial submission.  This gap means developers may not know what paperwork to attach.  
+- **Workflow Gaps:** There is no formal **workflow diagram or checklist** in the docs.  The process is implied from context: submit game → review by support → if passed, publish.  However, no branches or escalations are given.  For example, if a game fails a check (security, quality, etc.), the documents do not say whether it is simply rejected, sent back for revision, or escalated to a higher-level review.  This lack of clarity can cause delays and repeated back‐and‐forth.  
+- **Consistency Issues:** Some information appears on multiple pages (e.g. the XSS policy is mentioned in “RGS Communication” and implicitly in “Front End Communication”) without cross-referencing.  Terminology varies slightly (the same rule may be phrased differently), which could confuse readers.  Also, certain terms are misspelled (“avaliable”) or formatted inconsistently, hinting at lack of editorial coherence.  There is no single source that developers can reference to see all requirements in one place.  
+
+## Gap Analysis (Table)
+
+| **Area / Criterion**            | **Current Guideline Coverage**                                          | **Gap or Issue**                                                    | **Risk if Unaddressed**                                        |
+|---------------------------------|-------------------------------------------------------------------------|---------------------------------------------------------------------|----------------------------------------------------------------|
+| Submission checklist            | Blurb/description tag required【59†L1-L1】; “Post Release Notes” mentioned | No comprehensive list of required items (e.g. screenshots, game rules, RTP, version notes).  Unclear submission format (portal vs email) | Incomplete submissions; delays while clarifying what’s needed; inconsistent documentation. |
+| Roles & Responsibilities        | Only mentions “technical support” reviews submissions【59†L1-L1】         | No defined roles for developers (beyond “submit”), no separate QA/tester/editor roles, no clear decision authority or escalation. | Ambiguity over who fixes issues or signs off; bottlenecks if “tech support” overloaded; no accountability chart. |
+| Process & Timelines             | Implied linear flow, but no explicit steps or timelines given            | No stated review timeframe; no feedback turnaround; no branch for rework cycle; no milestone targets (e.g. “approval within X days”). | Developers left uncertain; possible frustration and inefficiency; inability to track performance.  |
+| Asset & Security requirements   | Static-only policy, unique assets, CDN usage (spread across pages)【24†L1-L1】【20†L1-L1】  | Requirements are scattered and partially redundant; guidelines do not specify e.g. allowed file formats, max sizes.  | Non-compliant builds (loading external fonts/APIs); security vulnerabilities; heavy assets causing performance issues. |
+| Localization & Compliance       | English default; US-specific term restrictions【58†L1-L1】               | No guidance for other languages/regions, unclear how to test localization (“social mode” not fully explained); no mention of age/regulatory compliance beyond terms. | Legal non-compliance in other markets; inconsistent localization efforts; risk of regulatory violations. |
+| Testing & Quality Standards     | Sections imply requirements (game replay, math, quality ranks)【51†L1-L3】 | Vague criteria for acceptance; unclear pass/fail thresholds; no unified QA checklist. | Submissions fail late; unpredictable review results; quality standards not transparent to developers. |
+| Documentation Clarity           | Split into multiple pages (Approval Guidelines, RGS Comm, Front End Comm, etc.) | No single-page reference or summary; navigation between sections may miss cross-links. | Developers may overlook requirements; redundant information; slower onboarding for new developers. |
+| Content Consistency             | Some spelling/format issues (e.g. *avaliable*), fragmented wording          | Inconsistencies in terminology and detail level across pages.        | Developer confusion; possible misinterpretation of rules; diminished professionalism of docs. |
+
+## Recommended Standardised Approval Checklist / Template  
+To ensure consistency and completeness, we recommend a single **Approval Checklist** that developers and reviewers can follow.  Each submission should include the following items (each checked off before submission):
+
+- **Game Submission Form:** Include game title, category, theme description (short blurb for marketing), and an overview of game mechanics.  
+- **Game Package:** A zipped build containing all static files (HTML/JS/CSS/images).  All code must be static; games must use the provided `rgs_url` parameter for the remote server.  No server calls to unknown domains.  
+- **Assets & CDN:** All images, sprites, and audio files must be unique (no reused sample assets) and loaded from Stake Engine’s approved CDN.  All fonts must also be served from the CDN (no external font downloads).  Check that the game does not attempt any external XHR/websocket beyond the RGS.  
+- **Localization:** English must be implemented for all UI and rules.  If supporting other languages, ensure they are fully translated and tested (Stake Engine’s “social mode” can be used for QA).  Provide a list of supported languages.  
+- **Jurisdiction Compliance:** Confirm that game content (rules text, symbols, etc.) complies with target jurisdictions.  For example, for stake.us (USA), ensure no prohibited gambling terms are used.  Review and attest to any necessary legal adjustments (e.g. different symbols or rules).  
+- **Technical Compliance:** Include a statement of compliance with the Stake Engine XSS/static-file policy (i.e. “This build uses only static files and approved domains”).  Ensure no console errors (particularly CORS or font errors).  
+- **Math & Provably Fair:** Provide documentation or logs demonstrating that the game math is correct and provably fair.  Include RNG seed/replay tests or simulation summaries (e.g. from Stake’s math SDK) showing payouts match the theoretical model.  
+- **Game Rules & Stats:** Submit a clear rule sheet (including symbols, paytable, bonus rules) and return-to-player (RTP) percentage.  Include volatility rating or anything needed to classify the game.  
+- **Media Assets:** Attach a high-quality game tile image (with specified dimensions), and any promotional graphics needed for listings.  Also include at least one screenshot or video preview of gameplay for review.  
+- **Release Notes (if applicable):** If this is a new version of a previously approved game, provide a concise summary of changes since the last version.  
+- **Contact and Legal Info:** Provide developer contact details and any required legal documentation (licenses, proof of RNG certification, if applicable).  
+
+Using this checklist (or a structured form) will make it easy for developers to submit all required items and for reviewers to verify them systematically.  
+
+## Proposed Approval Workflow 
+
+```mermaid
+flowchart LR
+    subgraph Submission [Developer Submission]
+      A[Developer Prepares Game] --> B[Upload & Submit to Stake Engine Platform]
+    end
+    subgraph Review [Review Process]
+      B --> C[Technical Support Review] 
+      C -->|If Issues Found| D[Developer Revisions (return to submission)]
+      C -->|If Approved| E[Automated QA Tests]
+      E -->|If Fail QA| D
+      E -->|If Pass| F[Content/Compliance Sign-off]
+      F -->|If Issues| D
+      F -->|Final Approval| G[Mark Game Ready for Release]
+    end
+    subgraph Publish [Publication]
+      G --> H[Stake Engine Publishing Team]
+      H --> I[Game Goes Live on Platform]
+    end
+```
+
+In this workflow, the **Developer** submits the game package and all materials.  **Technical Support** performs an initial triage (checking blurb, basic content, asset rules).  If any issue is found at any stage, the game is sent back to the developer with feedback.  Once it passes technical checks, an **Automated QA** (e.g. math simulation, compliance scripts) runs.  A **Content/Compliance** check follows (final legal/jurisdiction review).  Upon final approval, the publishing team schedules the game release.  This flow ensures clear gates and a defined path for revisions.  
+
+## Prioritized Action Items 
+
+- **Consolidate Guidelines into One Source (Effort: Medium, Impact: High):** Merge the dispersed requirements into a single, canonical “Approval Process” document (or centralised webpage).  This eliminates duplication and ensures developers see all criteria at once.  
+- **Define Roles & Responsibilities (Effort: Low, Impact: High):** Explicitly document each stakeholder’s role (e.g. Developer, Tech Support, QA, Legal).  Clarify who has final sign-off and who handles feedback.  This reduces confusion and prevents tasks from falling through gaps.  
+- **Add Clear Timelines (Effort: Low, Impact: Medium):** Establish target review times (e.g. initial review in 5 business days, final decision in 10 days).  Even vague timelines (“within two weeks”) provide developer expectations and improve planning.  
+- **Formalise Escalation & Feedback (Effort: Low, Impact: Medium):** Document how issues are communicated (e.g. feedback reports) and whether there is an appeals or expedited review process.  Ensure a closed-loop when games are sent back (e.g. developer acknowledges fixes).  
+- **Standardise and Complete Submission Checklist (Effort: Low, Impact: High):** Publish a downloadable checklist or form (like above) that developers must complete.  This makes sure no critical item is missed and speeds up reviews.  
+- **Harmonise Asset/Security Rules (Effort: Low, Impact: Medium):** Consolidate the XSS, asset-hosting, and CDN requirements into one section.  Clarify allowed file types, naming conventions, and max sizes.  This prevents contradictory instructions.  
+- **Expand Localization/Compliance Guidance (Effort: Medium, Impact: High):** Provide more detail for other markets (EU, Asia, etc.) or at least general advice (e.g. avoid certain symbols or words globally).  Possibly link to legal resources.  This mitigates the risk of post-release legal issues.  
+- **Spellcheck and Edit Content (Effort: Low, Impact: Low):** Fix typos (e.g. *avaliable* → *available*) and unify style across pages.  Professional, error-free documentation improves credibility and reduces misreading.  
+
+Each action is designed to be implemented quickly (low/med effort) and will significantly improve developer compliance and approval efficiency (medium/high impact).
+
+**Sources:** Stake Engine’s official documentation on “Approval Guidelines” and related sections【59†L1-L1】【20†L1-L1】【24†L1-L1】【50†L1-L1】 provides the basis for the criteria and issues identified above. (Citations refer to the relevant pages of the Stake Engine docs.)

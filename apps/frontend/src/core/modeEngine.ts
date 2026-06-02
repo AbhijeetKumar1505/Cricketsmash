@@ -8,7 +8,7 @@ import {
 import type { DecomposedBall } from '@cricket-crash/fairness';
 import type { BowlerType } from '../engine/physics/ballTrajectory.js';
 import type { SkyObjectMeta } from '../engine/sky/types.js';
-import { GAME_MODES, type GameModeName } from './stakeClient.js';
+import { GAME_MODES } from './stakeClient.js';
 
 export type ShotType =
   | 'bowled'
@@ -52,105 +52,80 @@ function ballRunCount(b: DecomposedBall): number {
 }
 
 function pickBowler(rng: () => number): BowlerType {
-  const BOWLER_TYPES: BowlerType[] = ['Fast', 'Spin', 'Swing'];
-  return BOWLER_TYPES[Math.floor(rng() * BOWLER_TYPES.length)]!;
+  const r = rng();
+  if (r < 0.35) return 'Fast';
+  if (r < 0.65) return 'Spin';
+  return 'Swing';
 }
 
 /**
- * Stake RGS: one `payoutMultiplier` per Play() — expanded to deliveries
- * via deterministic `decomposeRound` in `@cricket-crash/fairness`.
+ * God Mode: every hit becomes a six. Wickets pass through unchanged.
+ */
+export function applyGodModeOverrides(deliveries: Delivery[]): Delivery[] {
+  return deliveries.map(d => {
+    if (d.outcome.kind === 'wicket') return d;
+    return {
+      ...d,
+      outcome: { kind: 'runs' as const, runs: 6 as CricketRuns, multiplier: d.outcome.multiplier },
+      shotType: 'loft' as ShotType,
+    };
+  });
+}
+
+/**
+ * Expand one Stake RGS `payoutMultiplier` into a single Delivery.
+ * Always uses POWERPLAY (single-ball) decomposition.
  */
 export function generateDeliveries(
   finalMultiplier: number,
-  mode: GameModeName,
   options: {
     betID?: number;
     forcedKeys?: Array<'six' | 'four' | 'triple' | 'double' | 'single' | 'dot' | 'good_fielding' | 'catch_out'>;
     forceSkyType?: 'JETPACK' | 'SMALL_PLANE' | 'BIG_PLANE';
-    forceStreakLength?: 3 | 4 | 5 | 6;
   } = {},
 ): GenerateDeliveriesResult {
   const betID = options.betID ?? 0;
   const decoded = decomposeRound({
     payoutMultiplier: finalMultiplier,
     betID,
-    mode,
+    mode: GAME_MODES.POWERPLAY,
     applyOverCap: true,
     forcedKeys: options.forcedKeys,
     forceSkyType: options.forceSkyType,
-    forceStreakLength: options.forceStreakLength,
   });
 
-  const deliveries: Delivery[] = [];
-  let cumulative = 1;
+  const ball = decoded.balls[0];
+  if (!ball) return { deliveries: [], telemetry: decoded.telemetry };
 
-  for (let i = 0; i < decoded.balls.length; i++) {
-    const ball = decoded.balls[i]!;
-    const rng = mulberry32(seedFromString(`bowler:${betID}:${mode}:${i}:${finalMultiplier.toFixed(6)}`));
+  const rng = mulberry32(seedFromString(`bowler:${betID}:${finalMultiplier.toFixed(6)}`));
 
-    const startMultiplier = cumulative;
-
-    if (ball.key === 'catch_out' && finalMultiplier <= 0) {
-      deliveries.push({
+  if (ball.key === 'catch_out') {
+    return {
+      deliveries: [{
         outcome: { kind: 'wicket', multiplier: 0 },
-        startMultiplier,
+        startMultiplier: 1,
         endMultiplier: 0,
         bowlerType: pickBowler(rng),
-        shotType: deriveShotType(0, true, i * 3),
-      });
-      break;
-    }
-
-    const runs = ballRunCount(ball) as CricketRuns;
-    cumulative *= ball.factor;
-    const endMultiplier = cumulative;
-
-    const skyObject: SkyObjectMeta | undefined =
-      ball.skyType !== undefined
-        ? {
-            type: ball.skyType,
-            multiplier: ball.skyType === 'BIG_PLANE' ? 100 : 10,
-          }
-        : undefined;
-
-    deliveries.push({
-      outcome: { kind: 'runs', runs, multiplier: endMultiplier },
-      startMultiplier,
-      endMultiplier,
-      bowlerType: pickBowler(rng),
-      shotType: deriveShotType(runs, false, i * 7 + Math.floor(ball.factor * 47)),
-      skyObject,
-    });
-  }
-
-  if (
-    mode === GAME_MODES.OVER
-    && finalMultiplier > 0
-    && deliveries.length === 6
-  ) {
-    const snap = decoded.payoutMultiplier;
-    const lastIdx = 5;
-    const last = deliveries[lastIdx]!;
-    if (last.outcome.kind === 'runs') {
-      deliveries[lastIdx] = {
-        ...last,
-        endMultiplier: snap,
-        outcome: { ...last.outcome, multiplier: snap },
-      };
-    }
-  }
-
-  if (mode === GAME_MODES.POWERPLAY && deliveries.length === 1 && finalMultiplier > 0) {
-    const d0 = deliveries[0]!;
-    deliveries[0] = {
-      ...d0,
-      outcome:
-        d0.outcome.kind === 'runs'
-          ? { ...d0.outcome, multiplier: finalMultiplier }
-          : d0.outcome,
-      endMultiplier: finalMultiplier,
+        shotType: 'bowled',
+      }],
+      telemetry: decoded.telemetry,
     };
   }
 
-  return { deliveries, telemetry: decoded.telemetry };
+  const runs = ballRunCount(ball) as CricketRuns;
+  const skyObject: SkyObjectMeta | undefined = ball.skyType !== undefined
+    ? { type: ball.skyType, multiplier: ball.skyType === 'BIG_PLANE' ? 100 : 10 }
+    : undefined;
+
+  return {
+    deliveries: [{
+      outcome: { kind: 'runs', runs, multiplier: finalMultiplier },
+      startMultiplier: 1,
+      endMultiplier: finalMultiplier,
+      bowlerType: pickBowler(rng),
+      shotType: deriveShotType(runs, false, Math.floor(ball.factor * 47)),
+      skyObject,
+    }],
+    telemetry: decoded.telemetry,
+  };
 }

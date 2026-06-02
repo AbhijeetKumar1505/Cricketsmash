@@ -81,6 +81,19 @@ export function playCrack(): void {
   g.connect(c.destination);
   o.start();
   o.stop(c.currentTime + 0.055);
+
+  // Bass transient — low thump for physical impact feel
+  const bass = c.createOscillator();
+  const bassG = c.createGain();
+  bass.type = 'sine';
+  bass.frequency.setValueAtTime(180, c.currentTime);
+  bass.frequency.exponentialRampToValueAtTime(40, c.currentTime + 0.08);
+  bassG.gain.setValueAtTime(0.18, c.currentTime);
+  bassG.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.10);
+  bass.connect(bassG);
+  bassG.connect(c.destination);
+  bass.start();
+  bass.stop(c.currentTime + 0.12);
 }
 
 /** Wicket — triangle thud + square ping + noise burst */

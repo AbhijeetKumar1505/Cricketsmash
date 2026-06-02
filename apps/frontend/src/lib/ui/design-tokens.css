@@ -1,0 +1,219 @@
+/*
+ * Cricket Crash — Crystal Gold Luxury design tokens
+ * Imported globally via App.svelte. All UI components reference these vars.
+ */
+
+:root {
+  /* ─── Surfaces ─────────────────────────────────────────────────────────── */
+  --bg-deep:     #0A0D2A;
+  --bg-mid:      #16194a;
+  --bg-card:     linear-gradient(160deg,
+                   #1c1f55 0%,
+                   #11154a 35%,
+                   #0a0d28 75%,
+                   #060720 100%);
+
+  /* ─── Gold trio ────────────────────────────────────────────────────────── */
+  --gold:        #FFB800;
+  --gold-bright: #FFD95A;
+  --gold-cream:  #FFF1A3;
+  --gold-edge:   rgba(255, 184, 0, 0.60);
+
+  /* ─── Crystal layers (bumped for more glassy presence) ─────────────────── */
+  --crystal-1:   rgba(255, 255, 255, 0.07);
+  --crystal-2:   rgba(255, 255, 255, 0.12);
+  --crystal-3:   rgba(255, 255, 255, 0.20);
+  --crystal-bd:  rgba(255, 255, 255, 0.16);
+
+  /* ─── Reactive accents ─────────────────────────────────────────────────── */
+  --electric:    #00E7FF;
+  --success:     #00FF99;
+  --danger:      #FF3355;
+  --accent-purple: #A864FF;
+  --accent-teal:   #00FFC8;
+  --accent-coral:  #FF6B9D;
+
+  /* ─── Glow primitives (more saturated) ─────────────────────────────────── */
+  --glow-gold:        0 0 30px rgba(255, 184, 0, 0.50);
+  --glow-gold-strong: 0 0 52px rgba(255, 184, 0, 0.78);
+  --glow-electric:    0 0 22px rgba(0, 231, 255, 0.55);
+  --glow-purple:      0 0 22px rgba(168, 100, 255, 0.50);
+
+  /* ─── JS-driven multiplier intensity (0..1) — drives global glow scaling */
+  --ui-intensity: 0.25;
+}
+
+/* ─── 4-layer crystal panel ────────────────────────────────────────────────
+ * Applied to TopHUD, RightPanel, BetPanel, overlay sheets, AutobetOverlay
+ */
+.crystal-panel {
+  position: relative;
+  background:
+    radial-gradient(140% 90% at 50% 0%, var(--crystal-3), transparent 55%),
+    radial-gradient(80% 60% at 100% 100%, rgba(168, 100, 255, 0.22), transparent 60%),
+    radial-gradient(80% 60% at 0% 100%, rgba(0, 231, 255, 0.18), transparent 60%),
+    radial-gradient(60% 40% at 50% 50%, rgba(255, 184, 0, 0.06), transparent 70%),
+    linear-gradient(160deg, #22265e 0%, #15194f 35%, #0c102f 75%, #060720 100%);
+  border: 1px solid var(--crystal-bd);
+  box-shadow:
+    var(--glow-gold-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -28px 70px rgba(255, 184, 0, 0.10),
+    inset 0 0 0 1px rgba(255, 217, 90, 0.08);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  animation: crystal-breath 5s ease-in-out infinite;
+}
+
+@keyframes crystal-breath {
+  0%, 100% {
+    box-shadow:
+      0 0 30px rgba(255, 184, 0, 0.40),
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      inset 0 -28px 70px rgba(255, 184, 0, 0.10),
+      inset 0 0 0 1px rgba(255, 217, 90, 0.08);
+  }
+  50% {
+    box-shadow:
+      0 0 48px rgba(255, 184, 0, 0.62),
+      inset 0 1px 0 rgba(255, 255, 255, 0.20),
+      inset 0 -28px 70px rgba(255, 184, 0, 0.18),
+      inset 0 0 0 1px rgba(255, 217, 90, 0.18);
+  }
+}
+
+.crystal-panel::before {
+  /* gold edge highlight on top — pulses with crystal-edge keyframe */
+  content: '';
+  position: absolute;
+  top: 0; left: 6%; right: 6%;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent, var(--gold-edge), var(--gold-cream), var(--gold-bright), var(--gold-cream), var(--gold-edge), transparent);
+  pointer-events: none;
+  opacity: 0.95;
+  box-shadow: 0 0 12px rgba(255, 217, 90, 0.55);
+  animation: crystal-edge 5s ease-in-out infinite;
+}
+
+@keyframes crystal-edge {
+  0%, 100% { opacity: 0.75; filter: blur(0px); }
+  50%       { opacity: 1.00; filter: blur(0.5px); }
+}
+
+/* ─── Hexagonal utility chip ───────────────────────────────────────────────
+ * Used in LeftPanel for Difficulty / Bonus / Insurance / Missions / Leaderboard
+ */
+.crystal-chip {
+  position: relative;
+  width: 54px;
+  height: 60px;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  background:
+    radial-gradient(80% 60% at 50% 0%, rgba(255, 184, 0, 0.18), transparent 70%),
+    linear-gradient(140deg, var(--crystal-3) 0%, var(--crystal-1) 60%),
+    linear-gradient(180deg, #1c1f55 0%, #0a0d28 100%);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 0;
+  color: var(--gold-cream);
+  font-family: inherit;
+  transition: filter 0.18s, transform 0.18s, color 0.18s;
+}
+
+.crystal-chip::after {
+  /* gold gradient edge — masked to chip outline */
+  content: '';
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(
+    50% 0%,
+    100% 25%, 100% 75%,
+    50% 100%,
+    0% 75%, 0% 25%
+  );
+  background:
+    linear-gradient(180deg, var(--gold-edge) 0%, rgba(255,184,0,0.12) 35%, transparent 70%);
+  opacity: 0.75;
+  pointer-events: none;
+  transition: opacity 0.18s;
+}
+
+.crystal-chip:hover:not(:disabled) {
+  transform: translateY(-3px);
+  filter: brightness(1.30) drop-shadow(0 0 14px rgba(255, 184, 0, 0.65));
+  color: var(--gold-bright);
+}
+.crystal-chip:hover:not(:disabled)::after { opacity: 1; }
+
+.crystal-chip:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+.crystal-chip.is-active {
+  filter: brightness(1.15) drop-shadow(0 0 8px rgba(255, 184, 0, 0.55));
+  color: var(--gold-bright);
+}
+.crystal-chip.is-active::after { opacity: 1; }
+
+.crystal-chip .chip-icon {
+  display: grid;
+  place-items: center;
+  color: inherit;
+}
+
+.crystal-chip .chip-label {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.42rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  color: rgba(255, 241, 163, 0.72);
+}
+
+/* ─── Animated light sweep ─────────────────────────────────────────────────
+ * Applied to TopHUD + Place Bet button idle state.
+ */
+@keyframes light-sweep {
+  0%   { transform: translateX(-120%); opacity: 0; }
+  18%  { opacity: 0.95; }
+  100% { transform: translateX(220%); opacity: 0; }
+}
+
+.sweep-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 35%;
+  height: 100%;
+  background: linear-gradient(110deg,
+    transparent 0%,
+    var(--crystal-3) 40%,
+    rgba(255, 240, 180, 0.42) 50%,
+    var(--crystal-3) 60%,
+    transparent 100%);
+  animation: light-sweep 5.5s ease-in-out infinite;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+/* ─── Gold illuminated divider ─────────────────────────────────────────────
+ * 1px horizontal line, fades in from both sides
+ */
+.gold-divider {
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--gold-edge) 30%,
+    var(--gold-bright) 50%,
+    var(--gold-edge) 70%,
+    transparent 100%);
+  opacity: 0.55;
+  flex-shrink: 0;
+}

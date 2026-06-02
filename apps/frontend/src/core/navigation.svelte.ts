@@ -5,14 +5,22 @@ export type AppView =
   | 'result'
   | 'leaderboard';
 
-export type ActiveOverlay = 'character' | 'difficulty' | 'settings' | null;
-export type Difficulty = 'easy' | 'medium' | 'hard' | 'insane';
+export type ActiveOverlay =
+  | 'character'
+  | 'difficulty'
+  | 'settings'
+  | 'autobet'
+  | 'missions'
+  | 'leaderboard'
+  | null;
+export type { Difficulty } from '../game/DifficultyEngine.js';
+import type { Difficulty } from '../game/DifficultyEngine.js';
 
 export const navigationState = $state({
   currentView: 'boot' as AppView,
   previousView: null as AppView | null,
   isTransitioning: false,
-  selectedAvatarId: 'putin' as string,
+  selectedAvatarId: 'putin' as string,   // matches default medium difficulty
   activeOverlay: null as ActiveOverlay,
   selectedDifficulty: 'medium' as Difficulty,
 });

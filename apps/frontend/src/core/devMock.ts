@@ -7,8 +7,6 @@ import type { StakeGameClient, AuthResult, PlayResult, GameModeName } from './st
 import type { Balance, AuthenticateConfig, JurisdictionFlags, Round } from 'stake-engine';
 import type { MathOutcomeKey, SkyObjectType } from '@cricket-crash/fairness';
 import {
-  STREAK_OVERRIDE_MULTIPLIERS,
-  isBoundaryOutcome,
   pickWeighted,
   profileForMode,
 } from './mathModel.js';
@@ -17,41 +15,31 @@ const MOCK_CURRENCY = 'USD' as const;
 // Bet levels in micro-units (1_000_000 = $1.00)
 const MOCK_BET_LEVELS = [1_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000, 500_000_000];
 
-// Math-first payout resolver for dev mode:
-// weighted base outcome -> rare sky override -> rare streak override.
+// Generate a round payoutMultiplier from the economic table.
+// Step 1: decide win/wicket from the full profile (preserves correct catch_out weight).
+// Step 2: if win, pick a non-zero outcome from the positive-only profile for the
+//         base multiplier, then optionally apply a sky event override.
+// This gives ~95% RTP for OVER mode (STANDARD_PROFILE) with ~15% wicket rate.
 function randomPayoutMultiplier(mode: GameModeName): number {
   const profile = profileForMode(mode);
-  const base = pickWeighted(profile.outcomes, (o) => o.weight, Math.random);
-  let resolved = base.multiplier;
 
-  // Sky uses override multipliers (never additive).
+  // Single draw from full profile decides wicket vs win (respects catch_out weight).
+  const roundPick = pickWeighted(profile.outcomes, (o) => o.weight, Math.random);
+  if (roundPick.key === 'catch_out') return 0;
+
+  // Win: use the selected outcome's multiplier as the round payout.
+  let mult = roundPick.multiplier;
+
+  // Sky event overrides the base multiplier (chance matches spec table).
   if (Math.random() < profile.sky.chance) {
-    const sky = pickWeighted(
-      [
-        { key: 'jetpack', weight: profile.sky.weights.jetpack },
-        { key: 'smallPlane', weight: profile.sky.weights.smallPlane },
-        { key: 'bigPlane', weight: profile.sky.weights.bigPlane },
-      ] as const,
-      (o) => o.weight,
-      Math.random,
-    );
-    resolved =
-      sky.key === 'bigPlane'
-        ? profile.sky.multipliers.bigPlane
-        : profile.sky.multipliers.jetpack;
+    const skyW = profile.sky.weights;
+    const skyRoll = Math.random();
+    mult = skyRoll < skyW.bigPlane
+      ? profile.sky.multipliers.bigPlane
+      : profile.sky.multipliers.jetpack;
   }
 
-  // Streak bonuses are ultra-rare volatility injectors.
-  // We approximate boundary streak rarity from p(boundary)^3 ~= 0.13%.
-  if (isBoundaryOutcome(base.key)) {
-    const streakRoll = Math.random();
-    if (streakRoll < 0.001331) resolved = Math.max(resolved, STREAK_OVERRIDE_MULTIPLIERS[3]);
-    else if (streakRoll < 0.001531) resolved = Math.max(resolved, STREAK_OVERRIDE_MULTIPLIERS[4]);
-    else if (streakRoll < 0.001631) resolved = Math.max(resolved, STREAK_OVERRIDE_MULTIPLIERS[5]);
-    else if (streakRoll < 0.001681) resolved = Math.max(resolved, STREAK_OVERRIDE_MULTIPLIERS[6]);
-  }
-
-  return Number(resolved.toFixed(2));
+  return Number(mult.toFixed(2));
 }
 
 export function createDevMockClient(): StakeGameClient {
@@ -97,7 +85,7 @@ export function createDevMockClient(): StakeGameClient {
       };
     },
 
-    async play(amount: number, mode: GameModeName = 'OVER'): Promise<PlayResult> {
+    async play(amount: number, mode: GameModeName = 'POWERPLAY'): Promise<PlayResult> {
       await new Promise((r) => setTimeout(r, 200));
 
       // Deduct bet

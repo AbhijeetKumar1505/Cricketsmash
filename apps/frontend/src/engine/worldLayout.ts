@@ -27,16 +27,11 @@ export function getDepthScale(z: number, opts?: DepthScaleOpts): number {
   return THREE.MathUtils.clamp(1 + (z - Z_REF_DEPTH) * k, lo, hi);
 }
 
-const FIELDER_SCALE_MIN = 0.52;
+const FIELDER_SCALE_MIN = 0.82;
 
-/**
- * Outfield character scale from distance along Z from the crease.
- * `max(0.45, 1 / (1 + 0.06 * |z - crease|))` — far fielders shrink but stay readable.
- */
 export function getFielderDepthScale(z: number): number {
-  // Stronger falloff so far fielders read clearly smaller than near ones.
   const d = Math.abs(z - BATSMAN_CREASE_Z);
-  return Math.max(FIELDER_SCALE_MIN, 1 - d * 0.038);
+  return Math.max(FIELDER_SCALE_MIN, 1 - d * 0.015);
 }
 
 export type FielderSlot = {
@@ -73,7 +68,7 @@ export function broadcastHierarchyFielderScale(name: string): number {
     case 'deep_mid_wicket':
     case 'deep_third_man':
     case 'deep_fine_leg':
-      return 0.86;
+      return 0.97;
     default:
       return 0.95;
   }
@@ -204,12 +199,12 @@ const FIELDER_TEMPLATES: ReadonlyArray<FielderTemplate> = [
   { name: 'gully',           depthT: 0.04, lateral: -0.74, silhouetteScale: 0.98 },
   { name: 'point',           depthT: 0.56, lateral: -0.98, silhouetteScale: 0.94 },
   { name: 'cover',           depthT: 0.66, lateral: -0.42, silhouetteScale: 0.93 },
-  { name: 'deep_third_man',  depthT: 0.84, lateral: -0.74, silhouetteScale: 0.82 },
+  { name: 'deep_third_man',  depthT: 0.84, lateral: -0.74, silhouetteScale: 0.91 },
   { name: 'mid_on',          depthT: 0.28, lateral:  0.36, silhouetteScale: 0.95 },
   { name: 'square_leg',      depthT: 0.04, lateral:  0.74, silhouetteScale: 0.92 },
   { name: 'short_leg',       depthT: 0.56, lateral:  0.98, silhouetteScale: 0.96 },
-  { name: 'deep_mid_wicket', depthT: 0.66, lateral:  0.42, silhouetteScale: 0.88 },
-  { name: 'deep_fine_leg',   depthT: 0.84, lateral:  0.74, silhouetteScale: 0.84 },
+  { name: 'deep_mid_wicket', depthT: 0.66, lateral:  0.42, silhouetteScale: 0.94 },
+  { name: 'deep_fine_leg',   depthT: 0.84, lateral:  0.74, silhouetteScale: 0.92 },
 ];
 
 const FIXED_FIELD_MAP: ReadonlyArray<FielderSlot> = FIELDER_TEMPLATES.map((slot) => {

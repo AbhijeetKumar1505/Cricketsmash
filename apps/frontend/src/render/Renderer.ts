@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import type { EngineSnapshot } from '../engine/GameEngine.js';
 import { GameState } from '../engine/state/StateMachine.js';
 import type { FielderSlot } from '../engine/worldLayout.js';
@@ -7,25 +10,20 @@ import {
   BOWLER_RELEASE_Z,
   BOWLER_RUN_START_Z,
   FIELDER_SLOTS,
-  fielderStanceClassForName,
   broadcastHierarchyFielderScale,
   getDepthScale,
   getFielderDepthScale,
   PITCH_MID_Z,
   sampleFielderIdleLookPoint,
 } from '../engine/worldLayout.js';
-import type { SimPhase } from '../engine/physics/ballTrajectory.js';
-import { HumanCharacter } from '../characters/human/HumanCharacter.js';
-import {
-  animateHumanBatsman,
-  animateHumanBowler,
-  animateHumanFielder,
-  type AnimatorInput,
-} from '../characters/human/HumanAnimator.js';
-import { BatsmanController } from '../characters/human/controllers/BatsmanController.js';
-import { BowlerController }  from '../characters/human/controllers/BowlerController.js';
-import { FielderController } from '../characters/human/controllers/FielderController.js';
-import { HumanLOD }          from '../characters/human/lod/HumanLOD.js';
+import { preloadCharacter, instantiateCharacter } from '../game/CharacterManager.js';
+import type { CharacterInstance } from '../game/CharacterManager.js';
+import { AnimationBrain } from '../game/animation/AnimationBrain.js';
+import { batVibrationQuat } from '../game/animation/fxBus.js';
+import { gameBus } from '../game/GameEventBus.js';
+import { animDebug } from '../game/animation/animDebugState.svelte.js';
+import { anim_telemetry } from '../game/animation/animTelemetry.js';
+import { BAT_QUAT_OFFSET, BAT_SWEET_OFFSET, BAT_GRIP_SEAT } from '../characters/human/bat/batGeometry.js';
 import { DoodleAssets } from './doodle/DoodleAssets.js';
 import { Scene } from './Scene.js';
 import { Camera } from './Camera.js';
@@ -34,6 +32,7 @@ import { StadiumEntity } from './entities/Stadium.js';
 import { BonusObject3D } from './entities/BonusObject3D.js';
 import { SkyObject3D } from './entities/SkyObject3D.js';
 import { ImpactJuice } from './effects/ImpactJuice.js';
+import { ContactSpark } from './effects/ContactSpark.js';
 import type { Renderable } from '../engine/loop/GameLoop.js';
 
 function lerpAngle(current: number, target: number, t: number): number {
@@ -46,6 +45,41 @@ function setYawToTarget(root: THREE.Group, target: THREE.Vector3, smooth = 1, ya
   const dz = target.z - root.position.z;
   const targetYaw = Math.atan2(dx, dz) + yawOffset;
   root.rotation.y = lerpAngle(root.rotation.y, targetYaw, smooth);
+}
+
+// ── World-space bat sync helpers (module-level scratch, zero allocations) ─────
+const _tmpBatPos    = new THREE.Vector3();
+const _tmpBatQuat   = new THREE.Quaternion();
+const _tmpBatScale  = new THREE.Vector3();
+const _sweetSpot    = new THREE.Vector3();
+const _batUp        = new THREE.Vector3();
+const _ballPos      = new THREE.Vector3();
+const _vBallGrip    = new THREE.Vector3();
+const _closestOnBat = new THREE.Vector3();
+const _scratch      = new THREE.Vector3();
+const _round3 = (n: number) => Math.round(n * 1000) / 1000;
+// Bat geometry (BAT_QUAT_OFFSET / BAT_SWEET_OFFSET / BAT_GRIP_SEAT) is shared with
+// BatTargetIK via batGeometry.ts so both systems agree on where the blade is.
+
+// ── Minimal GLB mount — replaces HumanCharacter, no geometry/bones ────────────
+
+interface GlbMount {
+  root: THREE.Group;
+  scaleGroup: THREE.Group;
+  idlePhase?: number;
+  fieldXJitter?: number;
+  fieldYawJitter?: number;
+}
+
+function createGlbMount(): GlbMount {
+  const root = new THREE.Group();
+  const scaleGroup = new THREE.Group();
+  root.add(scaleGroup);
+  return { root, scaleGroup };
+}
+
+function isCloseFielderSlot(name: string): boolean {
+  return name === 'slip' || name === 'gully' || name === 'short_leg';
 }
 
 // Keep badge system for future debugging/mapping, but off for normal gameplay.
@@ -90,22 +124,15 @@ function createFielderNumberBadge(num: number): { sprite: THREE.Sprite; texture:
 
 export class Renderer implements Renderable {
   private readonly gl: THREE.WebGLRenderer;
+  private readonly composer: EffectComposer;
+  private readonly bloomPass: UnrealBloomPass;
   private readonly scene: Scene;
   private readonly cam: Camera;
   private readonly assets: DoodleAssets;
   private readonly ball: BallEntity;
-  private readonly batsmanChar: HumanCharacter;
-  private readonly bowlerChar: HumanCharacter;
-  private readonly fielders: Array<{ char: HumanCharacter; slot: FielderSlot; ctrl: FielderController; lod: HumanLOD }>;
-  private readonly batsmanCtrl: BatsmanController;
-  private readonly bowlerCtrl:  BowlerController;
-  private readonly batsmanLOD: HumanLOD;
-  private readonly bowlerLOD:  HumanLOD;
-  private readonly _bowlerBall: THREE.Mesh;
   private readonly stadium: StadiumEntity;
   private readonly impactJuice = new ImpactJuice();
-  private readonly fielderBadgeTextures: THREE.CanvasTexture[] = [];
-  private readonly fielderBadgeMaterials: THREE.SpriteMaterial[] = [];
+  private readonly contactSpark = new ContactSpark();
   private readonly bonusMeshes = new Map<string, BonusObject3D>();
   private _lastBonusHitId: string | null = null;
   private skyMesh: SkyObject3D | null = null;
@@ -117,11 +144,52 @@ export class Renderer implements Renderable {
   private readonly debugArc: THREE.Line;
   private readonly _fielderIdleLook = new THREE.Vector3();
 
+  // ── Pure GLB mounts (no procedural geometry) ──────────────────────────────
+  private readonly _batsmanMount: GlbMount;
+  private readonly _bowlerMount: GlbMount;
+  private readonly _fielderMounts: Array<{ mount: GlbMount; slot: FielderSlot }>;
+
+  // Bowler ball — attached to GLB right hand bone after load
+  private _bowlerBall: THREE.Mesh | null = null;
+  // Batsman cricket bat — attached to GLB right hand bone after load
+  private _batsmanBat: THREE.Group | null = null;
+
+  // GLB overlay roots — tracked for dispose
+  private readonly _glbRoots: THREE.Object3D[] = [];
+  // GLB character instances (needed for clean swaps)
+  private _batsmanInst: CharacterInstance | null = null;
+  private readonly _bowlerPlayerId = 'meloni';
+  private readonly _fielderInsts: (CharacterInstance | null)[] = [];
+  // AnimationBrain — sole animation pipeline for bowler, batsman, and fielders.
+  private readonly _animBrain = new AnimationBrain();
+  // Scratch quaternion for bat vibration FX application
+  private readonly _batVibrateQuat = new THREE.Quaternion();
+
+
+  // Badge textures (debug only)
+  private readonly fielderBadgeTextures: THREE.CanvasTexture[] = [];
+  private readonly fielderBadgeMaterials: THREE.SpriteMaterial[] = [];
+
   private snapshot: EngineSnapshot | null = null;
   private _lastTime = 0;
   private _time = 0;
+  // Edge tracker for HIT_FLASH gameBus emit (CSS overlay)
+  private _lastSeenContactId = -1;
+  private _hitFlashKey = 0;
+  // Contact timing validation
+  private _contactDeliveryCount = 0;
+  private _contactMinError = Infinity;        // legacy Y-only (hand anchor)
+  private _contactMinErrBall = Infinity;      // bat sweet-spot → actual ball (3D)
+  private _contactMinErrTarget = Infinity;    // bat sweet-spot → predicted target (3D)
+  private _contactMinPerp = Infinity;         // ball ⟂ distance to bat axis (diagnostic)
+  private _contactDump: Record<string, unknown> | null = null;
+  private _lastImpactCaptureId = 0;           // engine ballContactId — true impact event
+  private _impactDump: Record<string, unknown> | null = null;
+  // Debug spheres: red=ball, green=contactPointWorld, blue=bat blade sweet spot.
+  // Toggle with `window.__anim.contactDebug = false`. Default on.
+  private _contactDbg: { group: THREE.Group; ball: THREE.Mesh; target: THREE.Mesh; sweet: THREE.Mesh } | null = null;
+  private _prevBatsmanPhase = '';
 
-  /** Prior frame snapshot slice for stadium LED / crowd spectacle edge triggers. */
   private _stadiumAtmoPrev: {
     outcome: EngineSnapshot['round']['outcome'];
     hitQuality: string;
@@ -143,8 +211,6 @@ export class Renderer implements Renderable {
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
     this.gl.toneMappingExposure = 1.05;
-    // M7: enable shadow map for close characters (batsman/bowler).
-    // Fielders rely on the ContactShadow plane instead — bounded cost.
     this.gl.shadowMap.enabled = true;
     this.gl.shadowMap.type    = THREE.PCFSoftShadowMap;
 
@@ -152,48 +218,48 @@ export class Renderer implements Renderable {
     this.scene = new Scene();
     this.cam = new Camera(width / height);
 
+    // ── Post-processing pipeline (Crystal Gold bloom) ─────────────────────────
+    // strength, radius, threshold tuned conservatively — bloom accents gold
+    // floodlights / boundary glow / LED boards without washing out faces.
+    this.composer = new EffectComposer(this.gl);
+    this.composer.setSize(width, height);
+    this.composer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    this.composer.addPass(new RenderPass(this.scene.three, this.cam.three));
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(width, height),
+      0.22,  // strength (driven by multiplier in render())
+      0.80,  // radius
+      0.90,  // threshold — only very bright pixels bloom (daylight-safe, preserves faces)
+    );
+    this.composer.addPass(this.bloomPass);
+
     this.stadium = new StadiumEntity(this.assets);
-    this.bowlerChar  = new HumanCharacter('bowler');
-    this.batsmanChar = new HumanCharacter('batsman', options.batsmanAvatarId);
     this.ball = new BallEntity(this.assets);
 
-    const bBallGeo = new THREE.SphereGeometry(0.044, 12, 8);
-    const bBallMat = new THREE.MeshStandardMaterial({ color: 0xcc2020, roughness: 0.72, metalness: 0.0 });
-    this._bowlerBall = new THREE.Mesh(bBallGeo, bBallMat);
-    this._bowlerBall.position.set(0.01, -0.06, 0.05);
-    this.bowlerChar.bones.handR.add(this._bowlerBall);
-
-    this.batsmanCtrl = new BatsmanController(this.batsmanChar);
-    this.bowlerCtrl  = new BowlerController(this.bowlerChar);
-    this.batsmanLOD  = new HumanLOD(this.batsmanChar);
-    this.bowlerLOD   = new HumanLOD(this.bowlerChar);
-
-    this.scene.add(this.stadium.root);
-    this.scene.add(this.bowlerChar.root);
-    this.scene.add(this.batsmanChar.root);
-    const stanceForIdx = ['crouch', 'athletic', 'deep', 'lean'] as const;
-    this.fielders = FIELDER_SLOTS.map((slot, i) => {
-      const char = new HumanCharacter('fielder');
-      char.idlePhase          = i * 0.55;
-      char.fieldStanceClass   = fielderStanceClassForName(slot.name);
-      char.poseType           = i % 3;
-      char.fieldYawJitter     = THREE.MathUtils.degToRad(Math.sin(i * 1.731 + 0.2) * 6);
-      const closeSlot = slot.name === 'slip' || slot.name === 'gully' || slot.name === 'short_leg';
-      char.fieldXJitter = Math.cos(i * 2.419 + 0.7) * (closeSlot ? 0.035 : 0.09);
+    // ── Pure GLB mounts — minimal empty groups, no geometry ─────────────────
+    this._batsmanMount = createGlbMount();
+    this._bowlerMount  = createGlbMount();
+    this._fielderMounts = FIELDER_SLOTS.map((slot, i) => {
+      const mount = createGlbMount();
+      mount.idlePhase      = i * 0.55;
+      mount.fieldXJitter   = Math.cos(i * 2.419 + 0.7) * (isCloseFielderSlot(slot.name) ? 0.035 : 0.09);
+      mount.fieldYawJitter = THREE.MathUtils.degToRad(Math.sin(i * 1.731 + 0.2) * 6);
       if (SHOW_FIELDER_NUMBERS) {
         const badge = createFielderNumberBadge(i + 1);
         this.fielderBadgeTextures.push(badge.texture);
         this.fielderBadgeMaterials.push(badge.sprite.material as THREE.SpriteMaterial);
         badge.sprite.position.set(0, 2.2, 0.08);
-        char.scaleGroup.add(badge.sprite);
+        mount.scaleGroup.add(badge.sprite);
       }
-      const stance = stanceForIdx[char.fieldStanceClass] ?? 'athletic';
-      const ctrl   = new FielderController(char, stance, i);
-      const lod    = new HumanLOD(char);
-      return { char, slot, ctrl, lod };
+      return { mount, slot };
     });
-    for (const f of this.fielders) this.scene.add(f.char.root);
+
+    this.scene.add(this.stadium.root);
+    this.scene.add(this._batsmanMount.root);
+    this.scene.add(this._bowlerMount.root);
+    for (const { mount } of this._fielderMounts) this.scene.add(mount.root);
     this.scene.add(this.ball.root);
+    this.scene.add(this.contactSpark.root);
 
     this.debugRoot = new THREE.Group();
     this.debugRoot.visible = this.debugEnabled;
@@ -213,6 +279,9 @@ export class Renderer implements Renderable {
     this.debugRoot.add(this.debugSkyTarget);
     this.debugRoot.add(this.debugArc);
     this.scene.add(this.debugRoot);
+
+    // Async: load GLB assets and attach to mounts
+    void this._initGlbOverlays(options.batsmanAvatarId);
   }
 
   setSnapshot(snap: EngineSnapshot): void {
@@ -236,105 +305,66 @@ export class Renderer implements Renderable {
     if (this.snapshot) this.updateStadiumAtmosphere(this.snapshot);
     this.stadium.updateAnimations(scaledDt, this.cam.three, phaseForStadium);
 
-    // LOD tier selection — close characters get full pipeline, far fielders
-    // get the lightweight tier (less reaction + frozen frustum-culled meshes).
-    this.batsmanLOD.update(this.cam.three);
-    this.bowlerLOD.update(this.cam.three);
-
     if (!this.snapshot) {
-      this.gl.render(this.scene.three, this.cam.three);
+      this.composer.render();
       return;
     }
 
-    const { ball, batsman, bowler, feedback } = this.snapshot;
+    const { ball, bowler, feedback } = this.snapshot;
 
-    this.ball.update(ball);
+    // Pick trail color from snapshot context, then update ball
+    this._selectTrailLook(this.snapshot);
+    this.ball.update(ball, dt);
+    this.contactSpark.update(scaledDt);
     const ballPos = ball.active
       ? new THREE.Vector3(ball.x, ball.y, ball.z)
       : new THREE.Vector3(0, 1.0, PITCH_MID_Z);
 
-    // Position + yaw so each character root faces its attention target.
-    // Bowler: slight lateral offset (natural bowling lane), farther back for depth
     const bowlerZ  = THREE.MathUtils.lerp(BOWLER_RUN_START_Z, BOWLER_RELEASE_Z, bowler.runT) - 0.4;
     const batsmanZ = BATSMAN_CREASE_Z;
 
-    this.bowlerChar.root.position.set(0.14, 0, bowlerZ);  // X offset: natural bowling lane
-    setYawToTarget(this.bowlerChar.root, this.batsmanChar.root.position, 0.18, 0);
-    this.bowlerChar.scaleGroup.scale.setScalar(getDepthScale(bowlerZ) * 1.24 * 1.02);
+    // ── Bowler position + yaw ─────────────────────────────────────────────────
+    this._bowlerMount.root.position.set(0.14, 0, bowlerZ);
+    setYawToTarget(this._bowlerMount.root, this._batsmanMount.root.position, 0.18, 0);
+    this._bowlerMount.scaleGroup.scale.setScalar(getDepthScale(bowlerZ) * 1.44 * 1.02);
 
-    // Batsman: clear separation from wicket (forward of stumps), slight lateral for RH stance
-    this.batsmanChar.root.position.set(0.12, 0, batsmanZ - 0.24);  // Z: forward of wicket at 0.6
-    setYawToTarget(this.batsmanChar.root, this.bowlerChar.root.position, 0.2, 3 * Math.PI / 2);
-    this.batsmanChar.scaleGroup.scale.setScalar(getDepthScale(batsmanZ) * 1.32 * 1.06);
-
-    // Build snapshot-driven AnimatorInputs via the per-role CharacterController FSMs.
-    // No more hardcoded 'Fast' / 'defend' / 'none' — snapshot now carries intent.
-    const ctrlInput = { snapshot: this.snapshot, time: this._time, dt: scaledDt };
-
-    // Bowler
-    const bowlerInput: AnimatorInput = this.bowlerCtrl.update(ctrlInput);
-    bowlerInput.ballPos = ballPos;
-    animateHumanBowler(this.bowlerChar, bowlerInput);
-    this._bowlerBall.visible = bowlerInput.phase === 'idle';
-
-    // Batsman
-    const batsmanInput: AnimatorInput = this.batsmanCtrl.update(ctrlInput);
-    batsmanInput.ballPos = ballPos;
-    batsmanInput.stanceFocusWorld = this.bowlerChar.root.position;
-    // Drive base phaseProgress from the engine when actively swinging or in-flight,
-    // so layered animations still respect the existing timing curve.
-    if (batsman.phase === 'swing') {
-      batsmanInput.phaseProgress = THREE.MathUtils.clamp((batsman.swingAngle - -1.1) / (2.7 - -1.1), 0, 1) * 0.22;
-    } else if (this.snapshot.phase === 'BALL_TRAVEL' || this.snapshot.phase === 'HIT') {
-      batsmanInput.phaseProgress = THREE.MathUtils.clamp(ball.elapsed / (ball.params?.hitTime ?? 1.1), 0, 1);
+    // Show/hide the bowler ball based on bowling phase
+    if (this._bowlerBall) {
+      this._bowlerBall.visible = bowler.runT < 0.55;
     }
-    animateHumanBatsman(this.batsmanChar, batsmanInput);
 
-    // Fielders
-    for (let i = 0; i < this.fielders.length; i++) {
-      const { char, slot, ctrl, lod } = this.fielders[i];
+    // ── Batsman position + yaw ────────────────────────────────────────────────
+    this._batsmanMount.root.position.set(0.12, 0, batsmanZ - 0.24);
+    setYawToTarget(this._batsmanMount.root, this._bowlerMount.root.position, 0.2, 3 * Math.PI / 2);
+    this._batsmanMount.scaleGroup.scale.setScalar(getDepthScale(batsmanZ) * 1.32 * 1.06);
+
+    // ── Fielders ──────────────────────────────────────────────────────────────
+    const batRoot = this._batsmanMount.root.position;
+    for (let i = 0; i < this._fielderMounts.length; i++) {
+      const { mount, slot } = this._fielderMounts[i];
       const fState = this.snapshot.fielders[i];
-      lod.update(this.cam.three);
 
-      const posX = fState.phase === 'idle' ? slot.x + char.fieldXJitter : fState.x;
-      const posZ = fState.phase === 'idle' ? slot.z                      : fState.z;
+      const posX = fState.phase === 'idle' ? slot.x + (mount.fieldXJitter ?? 0) : fState.x;
+      const posZ = fState.phase === 'idle' ? slot.z : fState.z;
+      mount.root.position.set(posX, 0, posZ);
 
-      char.root.position.set(posX, 0, posZ);
-
-      const batRoot = this.batsmanChar.root.position;
       if (fState.phase === 'chase') {
-        setYawToTarget(char.root, ballPos, 0.25, char.fieldYawJitter);
+        setYawToTarget(mount.root, ballPos, 0.25, mount.fieldYawJitter ?? 0);
       } else {
         sampleFielderIdleLookPoint(slot.name, batRoot.x, batRoot.y, batRoot.z, this._fielderIdleLook);
-        setYawToTarget(char.root, this._fielderIdleLook, 0.14, char.fieldYawJitter);
+        setYawToTarget(mount.root, this._fielderIdleLook, 0.14, mount.fieldYawJitter ?? 0);
       }
 
-      char.scaleGroup.scale.setScalar(
-        getFielderDepthScale(posZ) * slot.silhouetteScale * 1.24 * broadcastHierarchyFielderScale(slot.name),
-      );
-
-      // Controller-driven AnimatorInput; the local chase/gather override is still
-      // applied here because BallSystem owns the immediate per-frame fielder phase.
-      const fInput = ctrl.update(ctrlInput);
-      fInput.ballPos = ballPos;
-      const animPhase: SimPhase =
-        fState.phase === 'chase'  ? 'bowl' :
-        fState.phase === 'gather' ? 'hit'  : fInput.phase;
-      const presenceW = THREE.MathUtils.clamp(1.12 - Math.abs(posZ - BATSMAN_CREASE_Z) * 0.026, 0.32, 1);
-      animateHumanFielder(
-        char,
-        ballPos,
-        this._time,
-        scaledDt,
-        animPhase,
-        presenceW,
-        fInput.fieldGatherBlend ?? 0,
+      mount.scaleGroup.scale.setScalar(
+        getFielderDepthScale(posZ) * slot.silhouetteScale * 1.5 * broadcastHierarchyFielderScale(slot.name),
       );
     }
 
+    this._updateGlbAnims(scaledDt);
     this.syncBonusObjects();
     this.syncSkyObject();
     this.syncDebugVisuals(ballPos);
+
     const activeBonusId = this.snapshot.activeBonusHit?.sourceId ?? null;
     if (activeBonusId && this._lastBonusHitId !== activeBonusId && this.snapshot.activeBonusHit) {
       this.impactJuice.triggerBonusImpact(this.snapshot.activeBonusHit.type, this.snapshot.activeBonusHit.worldPos);
@@ -346,13 +376,63 @@ export class Renderer implements Renderable {
       if (bSnap) mesh.update(this._time, scaledDt, id === activeBonusId, bSnap);
     }
 
+    // Fold AnimationBrain FX (camera impulse on release, recoil shake on contact)
+    const batFx = this._animBrain.getBatsmanFx();
+    const bowFx = this._animBrain.getBowlerFx();
+    const fxShake = batFx.cameraShake + bowFx.cameraShake;
+    const fxImpulse = bowFx.cameraImpulse + batFx.cameraImpulse;
+
+    // Edge-trigger HIT_FLASH overlay + perfect-timing spark on contact
+    const curContactId = this.snapshot.syncEvents.ballContactId;
+    if (curContactId !== this._lastSeenContactId) {
+      this._lastSeenContactId = curContactId;
+      if (curContactId > 0) {
+        const snap = this.snapshot;
+        const outcome = snap.round.outcome;
+        const m = snap.round.targetMult ?? 1;
+        let intensity = 0.35;
+        if (outcome === 'hit') {
+          if (snap.batsman.shotType === 'loft' || m >= 8) intensity = 1.0;
+          else if (m >= 3) intensity = 0.7;
+          else if (m >= 1.4) intensity = 0.5;
+          else intensity = 0.3;
+        } else if (outcome === 'wicket') {
+          intensity = 0.45;
+        }
+        this._hitFlashKey += 1;
+        gameBus.emit('HIT_FLASH', { intensity, key: this._hitFlashKey });
+
+        // Direct audio event — bypasses $effect latency
+        gameBus.emit('HIT_AUDIO', { intensity, quality: snap.feedback.hitQuality ?? 'good', vx: snap.ball.vx });
+
+        // V6: trigger ImpactJuice freeze+zoom+shake on every hit
+        this.impactJuice.triggerHitImpact();
+
+        // Impact camera: instant zoom punch + directional impulse toward shot
+        this.cam.triggerContactImpact(snap.ball.vx);
+
+        // Trail burst: brightens + lengthens trail streak for 150ms
+        this.ball.burst(0.15);
+
+        // Contact spark on all hits — scales with intensity
+        this.contactSpark.trigger(snap.ball.x, snap.ball.y, snap.ball.z, intensity);
+      }
+    }
+
     const shake = {
       x: feedback.shakeOffset.x + this.impactJuice.shakeOffset.x,
-      y: feedback.shakeOffset.y + this.impactJuice.shakeOffset.y,
-      z: feedback.shakeOffset.z + this.impactJuice.shakeOffset.z,
+      y: feedback.shakeOffset.y + this.impactJuice.shakeOffset.y + fxShake * (Math.random() - 0.5),
+      z: feedback.shakeOffset.z + this.impactJuice.shakeOffset.z + fxImpulse,
     };
     this.cam.update(this.snapshot, shake, this.impactJuice.zoomOffset);
-    this.gl.render(this.scene.three, this.cam.three);
+    this._syncBatToHand();
+
+    // Bloom strength tied to current multiplier (entire arena brightens as tension rises).
+    const mult = this.snapshot.round.cumulative ?? 1;
+    const bloomT = Math.min(1, Math.max(0, (mult - 1) / 9));
+    this.bloomPass.strength = 0.22 + bloomT * 0.45;
+
+    this.composer.render();
   }
 
   private updateStadiumAtmosphere(snap: EngineSnapshot): void {
@@ -398,6 +478,8 @@ export class Renderer implements Renderable {
 
   resize(width: number, height: number): void {
     this.gl.setSize(width, height);
+    this.composer.setSize(width, height);
+    this.bloomPass.setSize(width, height);
     this.cam.resize(width / height);
   }
 
@@ -405,13 +487,543 @@ export class Renderer implements Renderable {
     this.cam.setSessionPullZ(active ? 2.35 : 0);
   }
 
+  // ── Cricket bat factory ────────────────────────────────────────────────────
+
+  /**
+   * Build a cricket bat Group in the hand bone's local space.
+   * Long axis = local Y (Mixamo right-hand bone Y ≈ finger-tip direction).
+   * Grip tape at top (positive Y, inside hand), blade hangs below (negative Y).
+   *
+   * Tuning: adjust `g.position` / `g.rotation` here if the bat sits off-center
+   * for a particular GLB rig.
+   */
+  private _createCricketBat(): THREE.Group {
+    const g = new THREE.Group();
+
+    // Origin = grip mid-point (sits in palm after world-space sync + quat offset).
+    // +Y = toward bat knob, -Y = toward blade toe.
+
+    // Grip tape — rubberised wrap, straddles origin (+0.05 knob side → -0.02 handle side)
+    const gripGeo = new THREE.BoxGeometry(0.030, 0.14, 0.030);
+    const gripMat = new THREE.MeshStandardMaterial({ color: 0x110707, roughness: 0.95, metalness: 0 });
+    const grip    = new THREE.Mesh(gripGeo, gripMat);
+    grip.position.set(0, 0.05, 0);
+    g.add(grip);
+
+    // Handle — narrow willow section between grip and blade shoulder
+    const hGeo  = new THREE.BoxGeometry(0.026, 0.22, 0.026);
+    const hMat  = new THREE.MeshStandardMaterial({ color: 0xd4a050, roughness: 0.82, metalness: 0.02 });
+    const hMesh = new THREE.Mesh(hGeo, hMat);
+    hMesh.position.set(0, -0.12, 0);
+    g.add(hMesh);
+
+    // Blade — wider, brighter for silhouette readability at gameplay distance.
+    // Light willow colour + reduced roughness gives specular catch under stadium
+    // lights, making the bat pop against the pitch background.
+    const bGeo  = new THREE.BoxGeometry(0.115, 0.52, 0.044);
+    const bMat  = new THREE.MeshStandardMaterial({ color: 0xf5d98a, roughness: 0.55, metalness: 0.03 });
+    const blade = new THREE.Mesh(bGeo, bMat);
+    blade.position.set(0, -0.50, 0);
+    g.add(blade);
+
+    return g;
+  }
+
+  private _disposeBat(bat: THREE.Group): void {
+    bat.traverse(o => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        (Array.isArray(o.material) ? o.material : [o.material])
+          .forEach((m: THREE.Material) => m.dispose());
+      }
+    });
+  }
+
+  /**
+   * Sync the world-space bat Group to the batsman's right-hand bone each frame.
+   * Decomposing matrixWorld avoids inheriting the character's scale hierarchy,
+   * so bat geometry stays at true metre scale regardless of GLB proportions.
+   */
+  private _syncBatToHand(): void {
+    if (!this._batsmanBat || !this._batsmanInst) return;
+    const rh = this._batsmanInst.bones.get('rightHand');
+    if (!rh) {
+      // Bone not resolved — log available bones once and show bat at a rough guard position
+      // so orientation is still tunable from the screenshot.
+      if (this._batsmanBat.visible === false) {
+        const boneNames: string[] = [];
+        this._batsmanInst.root.traverse(o => { if (o instanceof THREE.Bone) boneNames.push(o.name); });
+        console.warn('[Renderer] rightHand bone not found. Available bones:', boneNames.join(', '));
+        // Fallback: place bat at approximate right-hand position in front of the batsman
+        const root = this._batsmanMount.root;
+        this._batsmanBat.position.set(
+          root.position.x + 0.20,
+          root.position.y + 0.85,
+          root.position.z + 0.05,
+        );
+        this._batsmanBat.quaternion.identity();
+        this._batsmanBat.visible = true;
+      }
+      return;
+    }
+    rh.updateWorldMatrix(true, false);
+    rh.matrixWorld.decompose(_tmpBatPos, _tmpBatQuat, _tmpBatScale);
+    this._batsmanBat.quaternion.copy(_tmpBatQuat).multiply(BAT_QUAT_OFFSET);
+    // Offset along bat handle (+Y after BAT_QUAT_OFFSET maps GLB Y → World -Y) so
+    // the grip seats in the palm instead of floating at the wrist joint.
+    this._batsmanBat.position
+      .copy(_tmpBatPos)
+      .addScaledVector(
+        _tmpBatScale.set(0, 1, 0).applyQuaternion(this._batsmanBat.quaternion),
+        BAT_GRIP_SEAT,
+      );
+
+    // FX bus contributes a short bat-vibration ring after contact (L7)
+    const fx = this._animBrain.getBatsmanFx();
+    if (fx.batVibration !== 0) {
+      batVibrationQuat(fx.batVibration, this._batVibrateQuat);
+      this._batsmanBat.quaternion.multiply(this._batVibrateQuat);
+    }
+
+    // ── Contact accuracy — bat SWEET SPOT (not the wrist) vs ball / target ──────
+    // The wrist bone sits ~0.4m from the bat sweet spot, so any hand-based metric
+    // is an anatomical constant, not contact accuracy. We measure the real bat:
+    // sweetSpot = bat origin (grip) + 0.468m up the blade (length 0.72 × 0.65).
+    if (this.snapshot) {
+      const curPhase = this.snapshot.batsmanFSM.phase;
+
+      // Live debug spheres so the spatial divergence is visible, not just logged
+      this._updateContactDebug();
+
+      // ── TRUE IMPACT FRAME ───────────────────────────────────────────────────
+      // The engine fires onContact (ballContactId++) and immediately relaunches
+      // the ball on its post-hit trajectory (GameEngine resolveSwing). This is the
+      // ONLY frame where "did the bat meet the ball" is even askable. Capture the
+      // bat sweet spot vs the ball at exactly this instant.
+      const cid = this.snapshot.syncEvents.ballContactId;
+      if (cid !== this._lastImpactCaptureId) {
+        this._lastImpactCaptureId = cid;
+        const sie  = this.snapshot.syncEvents;
+        const live = this.snapshot.ball;
+        // TRUE contact position (latched pre-relaunch), NOT the departing live ball.
+        _ballPos.set(sie.contactBallX, sie.contactBallY, sie.contactBallZ);
+        _batUp.set(0, 1, 0).applyQuaternion(this._batsmanBat.quaternion).normalize();
+        const grip = this._batsmanBat.position;
+        _vBallGrip.subVectors(_ballPos, grip);
+        const axisT = _vBallGrip.dot(_batUp);
+        _closestOnBat.copy(grip).addScaledVector(_batUp, axisT);
+        const perp = _ballPos.distanceTo(_closestOnBat);
+        _sweetSpot.copy(grip).addScaledVector(_batUp, BAT_SWEET_OFFSET);
+        const cp = this.snapshot.contactSolution?.contactPointWorld ?? null;
+        // predErr = how far the PLANNER's target is from the real contact point.
+        const predErr = cp ? _ballPos.distanceTo(_scratch.set(cp.x, cp.y, cp.z)) : null;
+        this._impactDump = {
+          contactId:    cid,
+          shot:         this.snapshot.batsman.shotType,
+          fsmPhase:     curPhase,                                   // should be CONTACT if timed
+          fsmProgress:  _round3(this.snapshot.batsmanFSM.progress),
+          contactBall:  [_round3(sie.contactBallX), _round3(sie.contactBallY), _round3(sie.contactBallZ)],
+          liveBall:     [_round3(live.x), _round3(live.y), _round3(live.z)],  // post-relaunch (departing)
+          contactPoint: cp ? [_round3(cp.x), _round3(cp.y), _round3(cp.z)] : null,
+          grip:         [_round3(grip.x), _round3(grip.y), _round3(grip.z)],
+          axisT_m:      _round3(axisT),
+          perpDist_m:   _round3(perp),
+          sweetToBall_m: _round3(_sweetSpot.distanceTo(_ballPos)),  // blade → true contact pos (overall)
+          predErr_m:    predErr === null ? null : _round3(predErr), // contactPoint → true contact pos (planner)
+        };
+        if (typeof window !== 'undefined') {
+          (window as any).__anim ??= {};
+          (window as any).__anim.lastImpactDump = this._impactDump;
+          (window as any).__anim.dumpImpactFrame = () => (window as any).__anim.lastImpactDump;
+        }
+        console.log('[IMPACT]', this._impactDump);
+      }
+
+      // Detect CONTACT entry — reset all minima
+      if (this._prevBatsmanPhase !== 'CONTACT' && curPhase === 'CONTACT') {
+        this._contactMinError     = Infinity;
+        this._contactMinErrBall   = Infinity;
+        this._contactMinErrTarget = Infinity;
+        this._contactMinPerp      = Infinity;
+        this._contactDeliveryCount += 1;
+      }
+      // Every frame during CONTACT — track minimum distances (closest approach).
+      // Reference = the LATCHED true contact position (constant through the phase),
+      // not the live ball which has already been relaunched and is departing.
+      if (curPhase === 'CONTACT') {
+        const sie = this.snapshot.syncEvents;
+        _ballPos.set(sie.contactBallX, sie.contactBallY, sie.contactBallZ);
+
+        // Legacy Y-only metric (hand anchor) — kept for animDebug continuity
+        const yErr = sie.contactBallY - _tmpBatPos.y;
+        if (yErr < this._contactMinError) this._contactMinError = yErr;
+
+        // Bat axis in world space (unit). grip = bat origin (this._batsmanBat.position).
+        _batUp.set(0, 1, 0).applyQuaternion(this._batsmanBat.quaternion).normalize();
+        const grip = this._batsmanBat.position;
+
+        // Bat sweet spot — blade side (local −Y), see BAT_SWEET_OFFSET
+        _sweetSpot.copy(grip).addScaledVector(_batUp, BAT_SWEET_OFFSET);
+        const errBall = _sweetSpot.distanceTo(_ballPos);
+        if (errBall < this._contactMinErrBall) this._contactMinErrBall = errBall;
+
+        const cs = this.snapshot.contactSolution;
+        if (cs) {
+          const cp = cs.contactPointWorld;
+          _scratch.set(cp.x, cp.y, cp.z);
+          const errTarget = _sweetSpot.distanceTo(_scratch);
+          if (errTarget < this._contactMinErrTarget) this._contactMinErrTarget = errTarget;
+        }
+
+        // ── DIAGNOSTIC: project ball onto the infinite bat axis ────────────────
+        // axisT = signed metres from grip along batUp to the point nearest the ball.
+        // perpDist = how far the ball is off the bat line. This is direction- and
+        // offset-agnostic: it reveals WHERE on the bat the ball is and whether the
+        // bat is even near it. Captured at the frame of closest approach (≈ impact).
+        _vBallGrip.subVectors(_ballPos, grip);
+        const axisT = _vBallGrip.dot(_batUp);
+        _closestOnBat.copy(grip).addScaledVector(_batUp, axisT);
+        const perp = _ballPos.distanceTo(_closestOnBat);
+        if (perp < this._contactMinPerp) {
+          this._contactMinPerp = perp;
+          const cp = cs?.contactPointWorld ?? null;
+          const predErr = cp ? _ballPos.distanceTo(_scratch.set(cp.x, cp.y, cp.z)) : null;
+          this._contactDump = {
+            delivery:        this._contactDeliveryCount,
+            shot:            this.snapshot.batsman.shotType,
+            contactBall:     [_round3(sie.contactBallX), _round3(sie.contactBallY), _round3(sie.contactBallZ)],
+            contactPoint:    cp ? [_round3(cp.x), _round3(cp.y), _round3(cp.z)] : null,
+            hand:            [_round3(_tmpBatPos.x), _round3(_tmpBatPos.y), _round3(_tmpBatPos.z)],
+            grip:            [_round3(grip.x), _round3(grip.y), _round3(grip.z)],
+            batUp:           [_round3(_batUp.x), _round3(_batUp.y), _round3(_batUp.z)],
+            axisT_m:         _round3(axisT),   // where ON the bat the ball is (0=grip, −=blade)
+            perpDist_m:      _round3(perp),    // ⟂ distance ball→bat line (the real "miss")
+            sweetToBall_m:   _round3(errBall), // blade sweet spot → true contact pos (overall)
+            predErr_m:       predErr === null ? null : _round3(predErr), // contactPoint → true contact pos (planner)
+          };
+        }
+      }
+      // Detect CONTACT exit — log + feed telemetry
+      if (this._prevBatsmanPhase === 'CONTACT' && curPhase !== 'CONTACT') {
+        const sie = this.snapshot.syncEvents;
+        const bfme = this.snapshot.batsmanFSM;
+        const fmt = (n: number) => n.toFixed(4);
+        const errBall   = Number.isFinite(this._contactMinErrBall)   ? this._contactMinErrBall   : 0;
+        const errTarget = Number.isFinite(this._contactMinErrTarget) ? this._contactMinErrTarget : 0;
+        const dump = this._contactDump;
+        const axisT   = dump ? (dump.axisT_m as number) : NaN;
+        const predErr = dump && dump.predErr_m != null ? (dump.predErr_m as number) : NaN;
+        console.log(
+          `[CONTACT] #${this._contactDeliveryCount}  ` +
+          `vsBall=${fmt(errBall)}  vsTarget=${fmt(errTarget)}  predErr=${fmt(predErr)}  ` +
+          `perp=${fmt(this._contactMinPerp)}  axisT=${fmt(axisT)}  ` +
+          `shot=${this.snapshot.batsman.shotType}`
+        );
+        // Renderer is the only place with the real bat mesh — feed telemetry here
+        anim_telemetry.setContactError(errBall, errTarget);
+        if (typeof window !== 'undefined') {
+          (window as any).__anim ??= {};
+          (window as any).__anim.lastContactError = errBall;
+          (window as any).__anim.lastContactDump  = dump;
+          (window as any).__anim.dumpLastContact  = () => (window as any).__anim.lastContactDump;
+        }
+        animDebug.contactDeliveryId = this._contactDeliveryCount;
+        animDebug.contactHeightError = this._contactMinError;
+        animDebug.contactBatsmanPhase = curPhase;
+        animDebug.contactBatsmanProgress = bfme.progress;
+        animDebug.contactBallVelY = this.snapshot.ball.vy;
+        animDebug.contactBounceCount = this.snapshot.ball.bounce;
+        animDebug.contactLog = animDebug.contactLog.concat([{
+          deliveryId: this._contactDeliveryCount,
+          ballY: sie.contactBallY,
+          batY: 0,
+          heightError: this._contactMinError,
+          ballVelY: this.snapshot.ball.vy,
+          bounceCount: this.snapshot.ball.bounce,
+        }]);
+      }
+      this._prevBatsmanPhase = curPhase;
+    }
+
+    this._batsmanBat.visible = true;
+  }
+
+  /**
+   * Update (lazily create) the contact-debug spheres so the spatial relationship
+   * between ball / IK target / bat sweet spot is visible in-scene:
+   *   red   = actual ball world position
+   *   green = contactSolution.contactPointWorld (the IK aim point)
+   *   blue  = bat blade sweet spot (grip + BAT_SWEET_OFFSET·batUp)
+   * Toggle via `window.__anim.contactDebug = false`. Rendered on top (no depth test).
+   */
+  private _updateContactDebug(): void {
+    if (!this._batsmanBat || !this.snapshot) return;
+    const on = typeof window === 'undefined'
+      ? false
+      : (((window as any).__anim?.contactDebug ?? true) as boolean);
+
+    if (!this._contactDbg) {
+      if (!on) return;
+      const mk = (color: number): THREE.Mesh => {
+        const m = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 12, 8),
+          new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9 }),
+        );
+        m.renderOrder = 999;
+        return m;
+      };
+      const group  = new THREE.Group();
+      const ball   = mk(0xff2222);
+      const target = mk(0x22ff22);
+      const sweet  = mk(0x2266ff);
+      group.add(ball, target, sweet);
+      this.scene.three.add(group);
+      this._contactDbg = { group, ball, target, sweet };
+    }
+
+    const dbg = this._contactDbg;
+    dbg.group.visible = on;
+    if (!on) return;
+
+    const b = this.snapshot.ball;
+    dbg.ball.position.set(b.x, b.y, b.z);
+    dbg.ball.visible = b.active;
+
+    _batUp.set(0, 1, 0).applyQuaternion(this._batsmanBat.quaternion).normalize();
+    dbg.sweet.position.copy(this._batsmanBat.position).addScaledVector(_batUp, BAT_SWEET_OFFSET);
+
+    const cs = this.snapshot.contactSolution;
+    if (cs) {
+      dbg.target.position.set(cs.contactPointWorld.x, cs.contactPointWorld.y, cs.contactPointWorld.z);
+      dbg.target.visible = true;
+    } else {
+      dbg.target.visible = false;
+    }
+  }
+
+  /**
+   * Load GLB character models and attach them to the minimal GlbMount containers.
+   * This is the sole rendering path — no procedural fallback meshes.
+   */
+  private async _initGlbOverlays(batsmanAvatarId?: string): Promise<void> {
+    type PlayerId = Parameters<typeof instantiateCharacter>[0];
+
+    const fitAndAttach = async (
+      mount: GlbMount,
+      playerId: PlayerId,
+      targetH = 1.6,
+    ): Promise<{ inst: CharacterInstance } | null> => {
+      try {
+        await preloadCharacter(playerId);
+      } catch (e) {
+        console.error(`[Renderer] Failed to load character "${playerId}":`, e);
+        return null;
+      }
+      const inst = instantiateCharacter(playerId);
+      if (!inst) { console.error(`[Renderer] instantiateCharacter("${playerId}") returned null`); return null; }
+
+      // Box3.setFromObject uses buffer geometry positions (bind pose), not skinned positions.
+      // For SkinnedMesh the bounding box can only be computed from geometry directly.
+      let h = 0;
+      inst.root.traverse(obj => {
+        if (obj instanceof THREE.SkinnedMesh && h === 0) {
+          const geo = obj.geometry;
+          if (!geo.boundingBox) geo.computeBoundingBox();
+          if (geo.boundingBox) h = geo.boundingBox.max.y - geo.boundingBox.min.y;
+        }
+      });
+      // Fallback to Box3 if no skinned mesh found
+      if (h <= 0.01) {
+        const box = new THREE.Box3().setFromObject(inst.root);
+        h = box.max.y - box.min.y;
+      }
+      const s = h > 0.01 ? targetH / h : 1.0;
+      inst.root.scale.setScalar(s);
+      // Ground the character: lift so feet sit at y=0
+      inst.root.position.set(0, 0, 0);
+      const floatBox = new THREE.Box3().setFromObject(inst.root);
+      inst.root.position.set(0, -floatBox.min.y, 0);
+
+      console.log(`[Renderer] "${playerId}" h=${h.toFixed(3)} scale=${s.toFixed(3)} yOffset=${inst.root.position.y.toFixed(3)} bones=${inst.bones.size}`);
+
+      mount.scaleGroup.add(inst.root);
+      this._glbRoots.push(inst.root);
+
+      return { inst };
+    };
+
+    const batsmanId = ((batsmanAvatarId && batsmanAvatarId in { modi:1, trump:1, putin:1, adeft:1, kimjong:1 })
+      ? batsmanAvatarId
+      : 'modi') as PlayerId;
+
+    const [bat, bowl, ...fields] = await Promise.allSettled([
+      fitAndAttach(this._batsmanMount, batsmanId),
+      fitAndAttach(this._bowlerMount, 'meloni'),
+      ...this._fielderMounts.map(({ mount }) => fitAndAttach(mount, 'ronaldo')),
+    ]).then(results => results.map(r => {
+      if (r.status === 'rejected') { console.error('[Renderer] fitAndAttach rejected:', r.reason); return null; }
+      return r.value;
+    }));
+
+    if (bat) {
+      this._batsmanInst = bat.inst;
+      this._animBrain.setBatsman({
+        instance: bat.inst,
+        root:     this._batsmanMount.root,
+        playerId: batsmanId,
+      });
+      // Bat lives in world space; synced to hand bone every frame via _syncBatToHand()
+      this._batsmanBat = this._createCricketBat();
+      this._batsmanBat.visible = false; // hidden until first sync confirms hand bone exists
+      this.scene.three.add(this._batsmanBat);
+    }
+
+    if (bowl) {
+      this._animBrain.setBowler({
+        instance: bowl.inst,
+        root:     this._bowlerMount.root,
+        playerId: this._bowlerPlayerId,
+      });
+      // Wire the bowler ball to the GLB's actual right hand bone
+      const handBone = bowl.inst.bones.get('rightHand');
+      if (handBone) {
+        const bBallGeo = new THREE.SphereGeometry(0.044, 12, 8);
+        const bBallMat = new THREE.MeshStandardMaterial({ color: 0xcc2020, roughness: 0.72, metalness: 0.0 });
+        this._bowlerBall = new THREE.Mesh(bBallGeo, bBallMat);
+        this._bowlerBall.position.set(0.01, -0.06, 0.05);
+        handBone.add(this._bowlerBall);
+      }
+    }
+
+    for (let i = 0; i < fields.length; i++) {
+      this._fielderInsts[i] = fields[i]?.inst ?? null;
+      const inst = fields[i]?.inst;
+      if (inst) {
+        this._animBrain.setFielder(i, {
+          instance: inst,
+          root:     this._fielderMounts[i].mount.root,
+          playerId: 'ronaldo',
+        });
+      }
+    }
+
+    // Swap batsman GLB when difficulty changes
+    gameBus.on('DIFFICULTY_CHANGED', async ({ batsman: newId }) => {
+      if (!newId) return;
+      const bid = newId as PlayerId;
+      if (this._batsmanInst) {
+        this._batsmanMount.scaleGroup.remove(this._batsmanInst.root);
+        const idx = this._glbRoots.indexOf(this._batsmanInst.root);
+        if (idx >= 0) this._glbRoots.splice(idx, 1);
+      }
+      // Unbind brain from old batsman before old instance is collected
+      this._animBrain.setBatsman(null);
+      // Dispose old bat (it was parented to the old hand bone, now removed)
+      if (this._batsmanBat) {
+        this.scene.three.remove(this._batsmanBat);
+        this._disposeBat(this._batsmanBat);
+        this._batsmanBat = null;
+      }
+      const result = await fitAndAttach(this._batsmanMount, bid);
+      if (result) {
+        this._batsmanInst = result.inst;
+        this._animBrain.setBatsman({
+          instance: result.inst,
+          root:     this._batsmanMount.root,
+          playerId: bid,
+        });
+        this._batsmanBat = this._createCricketBat();
+        this._batsmanBat.visible = false;
+        this.scene.three.add(this._batsmanBat);
+      }
+    });
+
+    // Swap all fielder GLBs on insurance/bonus-buy activation (ronaldo ↔ kimjong)
+    gameBus.on('FIELDER_SWAP', async ({ to }) => {
+      const newId = (to as PlayerId) ?? 'ronaldo';
+      for (let i = 0; i < this._fielderMounts.length; i++) {
+        const { mount } = this._fielderMounts[i];
+        const oldInst = this._fielderInsts[i];
+        if (oldInst) {
+          mount.scaleGroup.remove(oldInst.root);
+          const idx = this._glbRoots.indexOf(oldInst.root);
+          if (idx >= 0) this._glbRoots.splice(idx, 1);
+        }
+        this._animBrain.setFielder(i, null);
+        const result = await fitAndAttach(mount, newId);
+        this._fielderInsts[i] = result?.inst ?? null;
+        if (result?.inst) {
+          this._animBrain.setFielder(i, {
+            instance: result.inst,
+            root:     mount.root,
+            playerId: newId,
+          });
+        }
+      }
+    });
+  }
+
+  /** Map snapshot context → ball trail color/opacity/boost. Called per-frame. */
+  private _selectTrailLook(snap: EngineSnapshot): void {
+    const outcome = snap.round.outcome;
+    const m       = snap.round.targetMult ?? 1;
+    const shot    = snap.batsman.shotType;
+
+    if (outcome === 'hit') {
+      // six → gold boosted; four → cyan; runs → soft mint; small/dot → dim
+      const isSix = shot === 'loft' || m >= 8;
+      if (isSix)               return this.ball.setTrailLook(0xffd24a, 0.95, true);
+      if (shot === 'cut' || m >= 4) return this.ball.setTrailLook(0x40e0ff, 0.80, false);
+      if (m >= 1.4)            return this.ball.setTrailLook(0xb8ffd2, 0.65, false);
+      return this.ball.setTrailLook(0x9aa2b3, 0.45, false);
+    }
+    if (outcome === 'wicket') {
+      return this.ball.setTrailLook(0xff5b5b, 0.75, false);
+    }
+    // Pre-hit — color by bowler type
+    switch (snap.bowler.bowlerType) {
+      case 'Fast':  return this.ball.setTrailLook(0x40e0ff, 0.55, false);
+      case 'Spin':  return this.ball.setTrailLook(0xffb540, 0.55, false);
+      case 'Swing': return this.ball.setTrailLook(0x66ffd0, 0.55, false);
+      default:      return this.ball.setTrailLook(0xffcdd2, 0.50, false);
+    }
+  }
+
+  private _updateGlbAnims(dt: number): void {
+    if (!this.snapshot) return;
+    const { ball } = this.snapshot;
+
+    // ── All characters driven by AnimationBrain (Phases 1-3) ────────────────
+    const ballWorld = ball.active
+      ? new THREE.Vector3(ball.x, ball.y, ball.z)
+      // Ball idle → bowler + batsman + fielders still need a target so heads stay oriented
+      : new THREE.Vector3(0, 1.0, 0);
+    this._animBrain.update(this.snapshot, dt, ballWorld);
+
+    // Apply batsman trigger-step delta on the mount root Z.
+    // Renderer.render() already set the base batsman position; add the L0 offset.
+    if (this._animBrain.batsmanRootZ !== 0) {
+      this._batsmanMount.root.position.z += this._animBrain.batsmanRootZ;
+    }
+  }
+
   dispose(): void {
+    this._glbRoots.length = 0;
+    this._batsmanInst = null;
+    this._fielderInsts.length = 0;
+    if (this._batsmanBat) {
+      this.scene.three.remove(this._batsmanBat);
+      this._disposeBat(this._batsmanBat);
+      this._batsmanBat = null;
+    }
+    if (this._bowlerBall) {
+      this._bowlerBall.geometry.dispose();
+      (this._bowlerBall.material as THREE.Material).dispose();
+      this._bowlerBall = null;
+    }
     this.gl.dispose();
     this.ball.dispose();
     this.stadium.dispose();
-    this.batsmanChar.dispose();
-    this.bowlerChar.dispose();
-    for (const f of this.fielders) f.char.dispose();
     for (const mat of this.fielderBadgeMaterials) mat.dispose();
     for (const tex of this.fielderBadgeTextures) tex.dispose();
     for (const mesh of this.bonusMeshes.values()) mesh.dispose();

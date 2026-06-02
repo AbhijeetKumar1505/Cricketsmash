@@ -23,10 +23,6 @@
 
   onDestroy(() => scene?.dispose());
 
-  // Flags representing cricket-playing nations worldwide
-  const flags = ['🇮🇳','🇵🇰','🇦🇺','🇬🇧','🇿🇦','🇳🇿','🇧🇩','🇳🇬','🇦🇫','🇵🇬',
-                  '🇺🇸','🇨🇦','🇯🇵','🇨🇳','🇷🇺','🇰🇪','🇮🇹','🇧🇷','🇦🇪','🇸🇱'];
-  const loopFlags = [...flags, ...flags, ...flags];
 </script>
 
 <div class="wc" in:fade={{ duration: 700 }}>
@@ -48,38 +44,6 @@
     <div class="orb orb-2"></div>
     <div class="orb orb-3"></div>
   </div>
-
-  <!-- Top stats bar -->
-  {#if ready}
-    <header class="top-bar" in:fly={{ y: -28, duration: 700, delay: 150 }}>
-      <div class="live-badge" aria-label="Live players">
-        <span class="live-dot" aria-hidden="true"></span>
-        <span class="live-text">LIVE</span>
-      </div>
-
-      <div class="top-stats" role="status" aria-label="Server statistics">
-        <div class="ts-item">
-          <span class="ts-label">PLAYERS</span>
-          <span class="ts-val">12,847</span>
-        </div>
-        <div class="ts-div" aria-hidden="true"></div>
-        <div class="ts-item">
-          <span class="ts-label">JACKPOT</span>
-          <span class="ts-val ts-gold">$2.4M</span>
-        </div>
-        <div class="ts-div" aria-hidden="true"></div>
-        <div class="ts-item">
-          <span class="ts-label">MAX WIN</span>
-          <span class="ts-val">1000×</span>
-        </div>
-      </div>
-
-      <div class="top-end">
-        <button class="top-icon-btn" title="Settings" aria-label="Settings" onclick={() => {}}>⚙</button>
-        <button class="top-icon-btn" title="Leaderboard" aria-label="Leaderboard" onclick={() => {}}>🏆</button>
-      </div>
-    </header>
-  {/if}
 
   <!-- Hero section -->
   <main class="hero">
@@ -111,42 +75,8 @@
         </button>
       </div>
 
-      <!-- Secondary action buttons -->
-      <nav class="sec-nav" aria-label="Main menu" in:fly={{ y: 28, duration: 700, delay: 750 }}>
-        <button class="sn-btn" onclick={() => navigateTo('gameplay')} aria-label="Quick bet">
-          <span class="sn-icon" aria-hidden="true">⚡</span>
-          <span class="sn-label">QUICK BET</span>
-        </button>
-        <button class="sn-btn sn-highlight" onclick={() => navigateTo('gameplay')} aria-label="Tournament mode">
-          <span class="sn-icon" aria-hidden="true">🏆</span>
-          <span class="sn-label">TOURNAMENT</span>
-        </button>
-        <button class="sn-btn" onclick={() => navigateTo('gameplay')} aria-label="Choose avatar">
-          <span class="sn-icon" aria-hidden="true">👤</span>
-          <span class="sn-label">AVATAR</span>
-        </button>
-        <button class="sn-btn" onclick={() => navigateTo('gameplay')} aria-label="Skins and inventory">
-          <span class="sn-icon" aria-hidden="true">🎖</span>
-          <span class="sn-label">SKINS</span>
-        </button>
-      </nav>
     {/if}
   </main>
-
-  <!-- Scrolling country flags strip -->
-  {#if ready}
-    <div
-      class="flags-strip"
-      in:fade={{ delay: 1100, duration: 700 }}
-      aria-hidden="true"
-    >
-      <div class="flags-track">
-        {#each loopFlags as flag}
-          <span class="flag-item">{flag}</span>
-        {/each}
-      </div>
-    </div>
-  {/if}
 
   <!-- Legal footer -->
   <footer class="legal" aria-label="Legal notice">
@@ -262,108 +192,6 @@
     25% { transform: translate(35px, -22px); }
     50% { transform: translate(-12px, 32px); }
     75% { transform: translate(22px, 12px); }
-  }
-
-  /* ── Top bar ── */
-  .top-bar {
-    position: relative;
-    z-index: 10;
-    width: 100%;
-    max-width: 1100px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1.4rem 2rem 0;
-  }
-
-  .live-badge {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(255, 28, 48, 0.1);
-    border: 1px solid rgba(255, 28, 48, 0.22);
-    border-radius: 100px;
-    padding: 4px 10px;
-  }
-  .live-dot {
-    width: 6px;
-    height: 6px;
-    background: #ff3344;
-    border-radius: 50%;
-    animation: live-blink 1.5s ease-in-out infinite;
-    box-shadow: 0 0 6px #ff3344;
-  }
-  @keyframes live-blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.25; }
-  }
-  .live-text {
-    font-size: 0.6rem;
-    font-weight: 900;
-    letter-spacing: 0.2em;
-    color: #ff4455;
-  }
-
-  .top-stats {
-    display: flex;
-    align-items: center;
-    gap: 1.2rem;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 100px;
-    padding: 6px 18px;
-    backdrop-filter: blur(12px);
-  }
-  .ts-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-  }
-  .ts-label {
-    font-size: 0.45rem;
-    font-weight: 900;
-    letter-spacing: 0.14em;
-    color: rgba(255, 255, 255, 0.28);
-  }
-  .ts-val {
-    font-size: 0.72rem;
-    font-weight: 900;
-    color: rgba(255, 255, 255, 0.82);
-    font-variant-numeric: tabular-nums;
-  }
-  .ts-gold {
-    color: #ffc800;
-    text-shadow: 0 0 10px rgba(255, 200, 0, 0.45);
-  }
-  .ts-div {
-    width: 1px;
-    height: 18px;
-    background: rgba(255, 255, 255, 0.07);
-  }
-
-  .top-end {
-    display: flex;
-    gap: 8px;
-  }
-  .top-icon-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    color: rgba(255, 255, 255, 0.45);
-    cursor: pointer;
-    font-size: 0.85rem;
-    transition: all 0.2s;
-    display: grid;
-    place-items: center;
-    padding: 0;
-  }
-  .top-icon-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.8);
-    border-color: rgba(255, 255, 255, 0.12);
   }
 
   /* ── Hero ── */
@@ -527,86 +355,6 @@
     pointer-events: none;
   }
 
-  /* ── Secondary nav ── */
-  .sec-nav {
-    display: flex;
-    gap: 0.9rem;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-  .sn-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-    width: 88px;
-    padding: 1rem 0.4rem;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 16px;
-    color: rgba(255, 255, 255, 0.65);
-    cursor: pointer;
-    transition: all 0.25s;
-    backdrop-filter: blur(8px);
-  }
-  .sn-btn:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 200, 0, 0.22);
-    color: #fff;
-    transform: translateY(-5px);
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-  }
-  .sn-highlight {
-    background: rgba(255, 200, 0, 0.05);
-    border-color: rgba(255, 200, 0, 0.14);
-    color: #ffd700;
-  }
-  .sn-highlight:hover {
-    background: rgba(255, 200, 0, 0.1);
-    border-color: rgba(255, 200, 0, 0.32);
-    color: #ffd700;
-  }
-  .sn-icon {
-    font-size: 1.35rem;
-    line-height: 1;
-  }
-  .sn-label {
-    font-size: 0.52rem;
-    font-weight: 900;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  /* ── Flags strip ── */
-  .flags-strip {
-    position: relative;
-    z-index: 10;
-    width: 100%;
-    overflow: hidden;
-    padding: 0.7rem 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
-    -webkit-mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
-  }
-  .flags-track {
-    display: flex;
-    gap: 1.4rem;
-    width: max-content;
-    animation: flags-scroll 38s linear infinite;
-  }
-  @keyframes flags-scroll {
-    from { transform: translateX(0); }
-    to { transform: translateX(-33.333%); }
-  }
-  .flag-item {
-    font-size: 1.45rem;
-    opacity: 0.65;
-    filter: grayscale(0.25);
-    flex-shrink: 0;
-  }
-
   /* ── Legal footer ── */
   .legal {
     position: relative;
@@ -621,15 +369,7 @@
 
   /* ── Responsive ── */
   @media (max-width: 600px) {
-    .top-bar { padding: 1rem 1rem 0; }
-    .top-stats { gap: 0.8rem; padding: 5px 12px; }
     .brand-title { font-size: clamp(2.8rem, 14vw, 4.5rem); }
     .play-btn { width: 140px; height: 140px; }
-    .sec-nav { gap: 0.6rem; }
-    .sn-btn { width: 76px; padding: 0.8rem 0.3rem; }
-  }
-
-  @media (max-width: 400px) {
-    .top-stats { display: none; }
   }
 </style>

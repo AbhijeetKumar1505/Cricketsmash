@@ -1,24 +1,17 @@
 <script lang="ts">
   import { gsap } from 'gsap';
   import { onMount } from 'svelte';
-  import type { DeliveryOutcome } from '../../core/gameController.svelte.js';
 
   let {
-    history = [] as DeliveryOutcome[],
     multiplier = 1,
     betAmount = 0,
     profit = 0,
     wasWicket = false,
-    streak = 0,
-    onRestart = () => {},
   } = $props<{
-    history: DeliveryOutcome[];
     multiplier: number;
     betAmount: number;
     profit: number;
     wasWicket: boolean;
-    streak: number;
-    onRestart: () => void;
   }>();
 
   let container = $state<HTMLElement | undefined>();
@@ -26,160 +19,203 @@
   onMount(() => {
     if (!container) return;
     gsap.fromTo(container,
-      { scale: 0.92, opacity: 0, y: 20 },
-      { scale: 1, opacity: 1, y: 0, duration: 0.55, ease: 'back.out(1.6)' }
+      { scale: 0.88, opacity: 0, y: 28 },
+      { scale: 1, opacity: 1, y: 0, duration: 0.50, ease: 'back.out(1.7)' }
     );
   });
 
-  function ballLabel(entry: DeliveryOutcome): string {
-    if (!entry) return '';
-    if (entry.kind === 'wicket') return 'W';
-    if (entry.runs === 0) return '•';
-    return entry.runs.toString();
-  }
-
-  function ballColor(entry: DeliveryOutcome): { color: string; rgb: string; bg: string } {
-    if (!entry) return { color: 'rgba(255,255,255,0.15)', rgb: '255,255,255', bg: 'rgba(255,255,255,0.04)' };
-    if (entry.kind === 'wicket') return { color: '#ff1e3c', rgb: '255,30,60', bg: 'rgba(255,30,60,0.15)' };
-    if (entry.runs === 6)  return { color: '#ffc800', rgb: '255,200,0', bg: 'rgba(255,200,0,0.15)' };
-    if (entry.runs === 4)  return { color: '#00ff88', rgb: '0,255,136', bg: 'rgba(0,255,136,0.12)' };
-    if (entry.runs === 0)  return { color: 'rgba(255,255,255,0.35)', rgb: '255,255,255', bg: 'rgba(255,255,255,0.04)' };
-    return { color: '#00d4ff', rgb: '0,212,255', bg: 'rgba(0,212,255,0.12)' };
-  }
+  const totalReturn = $derived(betAmount + profit);
 
   const accentColor = $derived(wasWicket ? '#ff1e3c' : profit > 0 ? '#00ff88' : '#ffc800');
   const accentRgb   = $derived(wasWicket ? '255,30,60' : profit > 0 ? '0,255,136' : '255,200,0');
-
-  const heading    = $derived(wasWicket ? 'WICKET!' : 'OVER COMPLETE');
-  const subheading = $derived(wasWicket ? 'Better luck next time' : profit > 0 ? 'Great over!' : 'You broke even');
-
-  const profitSign   = $derived(profit > 0 ? '+' : '');
-  const profitColor  = $derived(profit > 0 ? '#00ff88' : profit < 0 ? '#ff1e3c' : '#ffc800');
+  const profitSign  = $derived(profit > 0 ? '+' : profit < 0 ? '−' : '');
+  const profitColor = $derived(profit > 0 ? '#00ff88' : profit < 0 ? '#ff3355' : '#ffc800');
+  const multLabel   = $derived(multiplier <= 0 ? '0.00x' : `${multiplier.toFixed(2)}x`);
 </script>
 
 <div
   bind:this={container}
-  class="scorecard-root absolute inset-0 z-[90] flex items-center justify-center p-4"
-  style="background: rgba(0,0,0,0.82); backdrop-filter: blur(16px);"
+  class="sc-root"
+  style="--acc:{accentColor}; --acc-rgb:{accentRgb};"
 >
-  <div
-    class="scorecard-card w-full max-w-lg flex flex-col gap-6 p-6 rounded-3xl border"
-    style="
-      background: rgba(6,10,24,0.9);
-      border-color: rgba({accentRgb}, 0.25);
-      box-shadow: 0 0 80px rgba({accentRgb}, 0.15), 0 40px 80px rgba(0,0,0,0.8);
-    "
-  >
-    <!-- Header -->
-    <div class="text-center">
-      <div
-        class="font-headline font-black text-4xl uppercase tracking-tighter mb-1"
-        style="color: {accentColor}; text-shadow: 0 0 30px rgba({accentRgb}, 0.8)"
-      >
-        {heading}
-      </div>
-      <div class="text-xs font-label font-bold text-white/40 uppercase tracking-widest">
-        {subheading}
-      </div>
+  <div class="sc-card">
+
+    <!-- Glow ring -->
+    <div class="sc-ring" aria-hidden="true"></div>
+
+    <!-- Multiplier — small chip at top -->
+    <div class="sc-mult-chip">
+      <span class="sc-mult-val">{multLabel}</span>
     </div>
 
-    <!-- Ball-by-ball scorecard -->
-    <div>
-      <div class="text-[9px] font-label font-bold text-white/30 uppercase tracking-widest mb-2 text-center">
-        This Over
-      </div>
-      <div class="flex gap-2 justify-center">
-        {#each Array(6) as _, i}
-          {@const entry = history[i] ?? null}
-          {@const bc = ballColor(entry)}
-          {@const label = ballLabel(entry)}
-          <div
-            class="ball-cell flex items-center justify-center font-headline font-black rounded-full"
-            style="
-              width: 42px; height: 42px;
-              font-size: {entry?.kind === 'wicket' ? '14px' : '16px'};
-              color: {bc.color};
-              background: {bc.bg};
-              border: 1.5px solid {bc.color};
-              box-shadow: {entry ? `0 0 12px rgba(${bc.rgb}, 0.3)` : 'none'};
-              text-shadow: {entry ? `0 0 10px rgba(${bc.rgb}, 0.9)` : 'none'};
-              opacity: {entry ? 1 : 0.2};
-            "
-          >
-            {label}
-          </div>
-        {/each}
-      </div>
+    <!-- PROFIT — hero number -->
+    <div class="sc-profit-wrap">
+      <span class="sc-profit-label">PROFIT</span>
+      <span class="sc-profit-val" style="color:{profitColor}">
+        {profitSign}{Math.abs(profit).toFixed(2)}
+      </span>
     </div>
 
-    <!-- Stats row -->
-    <div
-      class="grid grid-cols-3 gap-3 py-4 rounded-2xl border border-white/5"
-      style="background: rgba(255,255,255,0.03)"
-    >
-      <div class="flex flex-col items-center gap-1">
-        <div class="text-[10px] font-label font-bold text-white/35 uppercase tracking-widest">Multiplier</div>
-        <div
-          class="text-2xl font-headline font-black tabular-nums"
-          style="color: {accentColor}; text-shadow: 0 0 16px rgba({accentRgb}, 0.7)"
-        >
-          {multiplier <= 0 ? '0.00' : multiplier.toFixed(2)}<span class="text-sm opacity-60">x</span>
-        </div>
-      </div>
-
-      <div class="flex flex-col items-center gap-1 border-x border-white/5">
-        <div class="text-[10px] font-label font-bold text-white/35 uppercase tracking-widest">Stake</div>
-        <div class="text-2xl font-headline font-black text-white/80">
-          ${betAmount.toFixed(2)}
-        </div>
-      </div>
-
-      <div class="flex flex-col items-center gap-1">
-        <div class="text-[10px] font-label font-bold text-white/35 uppercase tracking-widest">Profit</div>
-        <div
-          class="text-2xl font-headline font-black tabular-nums"
-          style="color: {profitColor}; text-shadow: 0 0 12px {profitColor}55"
-        >
-          {profitSign}${Math.abs(profit).toFixed(2)}
-        </div>
-      </div>
+    <!-- Total return — secondary -->
+    <div class="sc-return-wrap">
+      <span class="sc-return-label">TOTAL RETURN</span>
+      <span class="sc-return-val">{totalReturn.toFixed(2)}</span>
     </div>
 
-    <!-- Streak badge -->
-    {#if streak >= 2}
-      <div class="flex justify-center">
-        <div
-          class="px-5 py-2 rounded-full font-label font-black text-xs uppercase tracking-widest"
-          style="
-            background: rgba(255,200,0,0.12);
-            border: 1px solid rgba(255,200,0,0.4);
-            color: #ffc800;
-            text-shadow: 0 0 10px rgba(255,200,0,0.7);
-          "
-        >
-          🔥 {streak} CONSECUTIVE BOUNDARIES
-        </div>
-      </div>
-    {/if}
-
-    <!-- Play Again -->
-    <button
-      onclick={onRestart}
-      class="w-full py-4 rounded-2xl font-headline font-black text-lg uppercase tracking-widest transition-all active:scale-95 hover:brightness-110"
-      style="
-        background: linear-gradient(135deg, rgba({accentRgb}, 0.15) 0%, rgba({accentRgb}, 0.35) 100%);
-        color: {accentColor};
-        border: 1.5px solid rgba({accentRgb}, 0.5);
-        box-shadow: 0 0 30px rgba({accentRgb}, 0.2), 0 4px 16px rgba(0,0,0,0.4);
-        cursor: pointer;
-      "
-    >
-      ↺ PLAY AGAIN
-    </button>
   </div>
 </div>
 
 <style>
-  .ball-cell { transition: transform 0.2s ease; }
-  .ball-cell:hover { transform: scale(1.08); }
+  .sc-root {
+    position: absolute;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  .sc-card {
+    position: relative;
+    width: 100%;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    padding: 36px 28px 32px;
+    border-radius: 28px;
+    background: linear-gradient(180deg,
+      rgba(8, 12, 28, 0.96) 0%,
+      rgba(4, 6, 18, 0.98) 100%
+    );
+    border: 1px solid rgba(var(--acc-rgb), 0.30);
+    box-shadow:
+      0 0 60px rgba(var(--acc-rgb), 0.18),
+      0 40px 80px rgba(0, 0, 0, 0.80),
+      inset 0 1px 0 rgba(var(--acc-rgb), 0.15);
+    overflow: hidden;
+  }
+
+  /* Ambient top glow ring */
+  .sc-ring {
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 220px;
+    height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at 50% 100%,
+      rgba(var(--acc-rgb), 0.40) 0%,
+      rgba(var(--acc-rgb), 0.08) 50%,
+      transparent 75%
+    );
+    pointer-events: none;
+    filter: blur(4px);
+  }
+
+  /* Multiplier chip — small, at top */
+  .sc-mult-chip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 14px;
+    border-radius: 100px;
+    border: 1px solid rgba(var(--acc-rgb), 0.35);
+    background: rgba(var(--acc-rgb), 0.08);
+    margin-bottom: 28px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .sc-mult-val {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.10em;
+    color: var(--acc);
+    text-shadow: 0 0 10px rgba(var(--acc-rgb), 0.60);
+  }
+
+  /* PROFIT — hero */
+  .sc-profit-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .sc-profit-label {
+    font-size: 0.50rem;
+    font-weight: 900;
+    letter-spacing: 0.28em;
+    color: rgba(255, 255, 255, 0.38);
+    text-transform: uppercase;
+  }
+
+  .sc-profit-val {
+    font-family: 'Outfit', sans-serif;
+    font-size: clamp(3.2rem, 11vw, 4.8rem);
+    font-weight: 900;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    text-shadow:
+      0 0 40px currentColor,
+      0 0 80px rgba(var(--acc-rgb), 0.30),
+      0 4px 0 rgba(0, 0, 0, 0.55);
+  }
+
+  /* Separator */
+  .sc-return-wrap {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding-top: 20px;
+    width: 100%;
+  }
+
+  .sc-return-wrap::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent,
+      rgba(var(--acc-rgb), 0.25) 30%,
+      rgba(var(--acc-rgb), 0.25) 70%,
+      transparent
+    );
+  }
+
+  .sc-return-label {
+    font-size: 0.44rem;
+    font-weight: 900;
+    letter-spacing: 0.22em;
+    color: rgba(255, 255, 255, 0.32);
+    text-transform: uppercase;
+  }
+
+  .sc-return-val {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.55rem;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.72);
+    text-shadow: 0 0 16px rgba(255, 255, 255, 0.15);
+  }
 </style>

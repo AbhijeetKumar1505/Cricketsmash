@@ -57,16 +57,16 @@ function makeOutfieldTexture(): THREE.CanvasTexture {
   cv.height = size;
   const cx = cv.getContext('2d')!;
 
-  // Deep vivid mowing bands — night-lit field looks rich saturated green
+  // Super-saturated mowing bands — vivid arcade-stadium green
   const bands = 14;
   const bandH = size / bands;
   for (let i = 0; i < bands; i++) {
-    cx.fillStyle = i % 2 === 0 ? '#2a9e3c' : '#238534';
+    cx.fillStyle = i % 2 === 0 ? '#3ec556' : '#2cae3d';
     cx.fillRect(0, i * bandH, size, bandH);
   }
 
-  // Bright sheen line between bands
-  cx.strokeStyle = 'rgba(255,255,255,0.28)';
+  // Bright white sheen line between bands
+  cx.strokeStyle = 'rgba(255,255,255,0.42)';
   cx.lineWidth = 5;
   for (let i = 1; i < bands; i += 2) {
     cx.beginPath();
@@ -79,7 +79,7 @@ function makeOutfieldTexture(): THREE.CanvasTexture {
   for (let i = 0; i < 2200; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
-    cx.fillStyle = i % 3 === 0 ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.018)';
+    cx.fillStyle = i % 3 === 0 ? 'rgba(255,255,255,0.020)' : 'rgba(0,0,0,0.018)';
     cx.fillRect(x, y, 1.6, 1.6);
   }
 
@@ -193,22 +193,25 @@ function makeScoreboardTexture(
   cv.height = h;
   const cx = cv.getContext('2d')!;
 
-  cx.fillStyle = '#74c9f6';
+  cx.fillStyle = '#040712';
   cx.fillRect(0, 0, w, h);
 
-  cx.fillStyle = '#ffffff';
+  cx.fillStyle = '#0a1024';
   cx.fillRect(18, 18, w - 36, h - 36);
-  cx.strokeStyle = '#4e90c9';
-  cx.lineWidth = 8;
+  cx.strokeStyle = '#ffb800';
+  cx.lineWidth = 4;
   cx.strokeRect(18, 18, w - 36, h - 36);
 
-  cx.fillStyle = '#4e90c9';
+  cx.shadowBlur = 18;
+  cx.shadowColor = '#ffb800';
+  cx.fillStyle = '#ffd95a';
   cx.font = 'bold 28px Arial, sans-serif';
   cx.textAlign = 'center';
   cx.textBaseline = 'middle';
   cx.fillText('CRICKET CRASH', w / 2, 50);
 
-  cx.fillStyle = '#67883f';
+  cx.shadowBlur = 0;
+  cx.fillStyle = 'rgba(255, 241, 163, 0.55)';
   cx.font = '20px Arial, sans-serif';
   cx.fillText(`BALL ${ballIdx + 1} OF ${totalBalls}`, w / 2, 92);
 
@@ -218,14 +221,16 @@ function makeScoreboardTexture(
   for (let i = 0; i < totalBalls; i++) {
     cx.beginPath();
     cx.arc(startX + i * pipGap, 134, pipR, 0, Math.PI * 2);
-    cx.fillStyle = i < ballIdx ? '#94d95f' : i === ballIdx ? '#ffd84e' : '#d7eef9';
+    cx.fillStyle = i < ballIdx ? '#00ff99' : i === ballIdx ? '#ffd95a' : '#2a3550';
     cx.fill();
-    cx.strokeStyle = '#4e90c9';
-    cx.lineWidth = 3;
+    cx.strokeStyle = '#ffb800';
+    cx.lineWidth = 2;
     cx.stroke();
   }
 
-  cx.fillStyle = multiplier >= 2 ? '#4aa864' : '#f0af2c';
+  cx.shadowBlur = 24;
+  cx.shadowColor = multiplier >= 2 ? '#00ff99' : '#ffb800';
+  cx.fillStyle = multiplier >= 2 ? '#00ff99' : '#ffd95a';
   cx.font = `bold ${multiplier >= 10 ? 44 : 54}px Arial, sans-serif`;
   cx.fillText(`x${multiplier.toFixed(2)}`, w / 2, 196);
 }
@@ -495,6 +500,21 @@ export class StadiumEntity {
     rope.rotation.x = Math.PI / 2;
     rope.position.set(0, 0.03, MID_Z);
     this.root.add(rope);
+
+    // Gold accent ring just inside the rope — softer in daylight
+    const glow = new THREE.Mesh(
+      new THREE.RingGeometry(BOUNDARY_R - 0.45, BOUNDARY_R - 0.05, 96),
+      new THREE.MeshBasicMaterial({
+        color: 0xffb800,
+        transparent: true,
+        opacity: 0.20,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.set(0, 0.015, MID_Z);
+    this.root.add(glow);
   }
 
   private buildWheatFence(assets: DoodleAssets): void {
@@ -660,13 +680,13 @@ export class StadiumEntity {
       [-20, MID_Z + 18],
     ];
 
-    const poleMat  = new THREE.MeshStandardMaterial({ color: 0x9ab0be, roughness: 0.5, metalness: 0.35 });
+    const poleMat  = new THREE.MeshStandardMaterial({ color: 0xa6bac8, roughness: 0.48, metalness: 0.35 });
     const headGlow = new THREE.MeshBasicMaterial({ color: 0xfffbe8 });
-    const ringMat  = new THREE.MeshBasicMaterial({ color: 0xddddcc });
+    const ringMat  = new THREE.MeshBasicMaterial({ color: 0xe2e2c8 });
     const haloMat  = new THREE.MeshBasicMaterial({
       color: 0xfff5b0,
       transparent: true,
-      opacity: 0.55,
+      opacity: 0.42,
       depthWrite: false,
     });
 
@@ -712,9 +732,9 @@ export class StadiumEntity {
     const haze = new THREE.Mesh(
       new THREE.SphereGeometry(22, 24, 16),
       new THREE.MeshBasicMaterial({
-        color: 0x040c22,
+        color: 0xc8e6ff,
         transparent: true,
-        opacity: 0.14,
+        opacity: 0.08,
         depthWrite: false,
         side: THREE.BackSide,
       }),
@@ -747,10 +767,16 @@ export class StadiumEntity {
 
   private buildCrowdBackdrop(): void {
     const sectionAngle = (Math.PI * 2) / STAND_SECTIONS;
-    // Lower tier: warm amber / cyan / gold — 3 controlled colors, no rainbow chaos.
-    // Upper tier: near-black navy that bleeds into the night sky — creates stadium depth.
-    const lowerColors = [0xf09030, 0x22a8d0, 0xf0b828, 0x0a7acc];
-    const upperColor  = 0x061424;
+    // Super-vibrant palette — six saturated bands cycled around the stands.
+    const lowerColors = [
+      0xffb800,   // gold
+      0x00e7ff,   // electric cyan
+      0xff5566,   // hot coral
+      0xa864ff,   // royal purple
+      0x00ff99,   // neon green
+      0x3088dd,   // saturated blue
+    ];
+    const upperColor  = 0x2a5cb8;
     const look = new THREE.Vector3();
 
     for (let s = 0; s < STAND_SECTIONS; s++) {
@@ -844,7 +870,13 @@ export class StadiumEntity {
   private buildScoreboard(): void {
     const frame = new THREE.Mesh(
       new THREE.BoxGeometry(8.4, 4.2, 0.5),
-      new THREE.MeshBasicMaterial({ color: 0x5eaee6 }),
+      new THREE.MeshStandardMaterial({
+        color: 0x1a2030,
+        roughness: 0.35,
+        metalness: 0.55,
+        emissive: 0xffb800,
+        emissiveIntensity: 0.05,
+      }),
     );
 
     const screen = new THREE.Mesh(

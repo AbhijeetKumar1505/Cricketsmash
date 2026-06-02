@@ -166,6 +166,29 @@ export const AVATARS: Record<string, AvatarProfile> = {
     },
   },
 
+  // ── God Mode batsman ─────────────────────────────────────────────────────────
+  'adeft': {
+    id: 'adeft',
+    name: 'ADEFT',
+    skinColor: 0x8822cc,
+    hairColor: 0xcc00ff,
+    shirtColor: 0x0a0010,
+    shortsColor: 0x060008,
+    shoeColor: 0x000000,
+    eyeColor: 0xdd00ff,
+    heightScale: 1.08,
+    widthScale: 0.96,
+    hairType: 'spiky',
+    beardType: 'none',
+    face: {
+      jawWidth: 0.90, cheekFull: 0.08, foreheadH: 1.15,
+      noseW: 0.88, noseL: 0.92,
+      eyeScale: 1.14, eyeSpacing: 1.10,
+      browThick: 0.80, browTilt: 0.20, browHeight: 0.05,
+      mouthW: 0.92, mouthYShift: 0.03,
+    },
+  },
+
   // ── Fielder squad ────────────────────────────────────────────────────────────
   'meloni': {
     id: 'meloni',

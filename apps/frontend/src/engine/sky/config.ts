@@ -13,9 +13,6 @@ import {
 /** Matches `Camera.ts` broadcast preset (camera world position). */
 export const SKY_CAMERA_WORLD = { x: 0, y: 4.72, z: 13 } as const;
 
-/** @deprecated Use `profileForMode(mode).sky.chance` — kept for logging parity. */
-export const SKY_OBJECT_CHANCE_STANDARD = profileForMode(GAME_MODES.OVER).sky.chance;
-/** @deprecated Use bonus-buy profile sky chance */
 export const SKY_OBJECT_CHANCE_BONUS_BUY = profileForMode(GAME_MODES.POWERPLAY).sky.chance;
 
 /**

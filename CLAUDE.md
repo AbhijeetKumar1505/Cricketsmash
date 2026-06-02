@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **MANDATORY: Before starting any task, read `feedback.md` in the project root.**
+> It contains hard-won lessons about what breaks, what works, and what must never be repeated —
+> especially for the animation system and Meshy AI rig integration.
+> Skipping it will cause you to repeat mistakes that have already cost significant debugging time.
+
 ## Project Overview
 
 **Cricket Crash** — a cricket-themed crash/multiplier game. Monorepo with pnpm workspaces. Primary mode is Stake RGS integration; architecture also anticipates real-time WebSocket and local single-over modes.

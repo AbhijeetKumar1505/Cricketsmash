@@ -10,11 +10,15 @@
  *     circular dependencies.
  *   • Each FSM exposes eased progress values ready for use by playerAnimator.
  *   • Durations match the existing GameEngine phase timing.
+ *   • BatsmanFSM accepts a ContactSolution at swing trigger for time-warped
+ *     swing timing — progress is computed relative to predicted ball arrival
+ *     rather than a fixed animation clock.
  *
  * THREE.js-free.
  */
 
 import { clamp, smoothstep } from './physics.js';
+import type { ContactSolution } from './ContactSolution.js';
 
 function easeOutQuad(t: number): number { return 1 - (1 - t) * (1 - t); }
 function easeInQuad(t: number):  number { return t * t; }
@@ -187,13 +191,14 @@ export type BatsmanPhase =
 
 /**
  * Phase durations (seconds).
- * CONTACT must align with the physics hit frame — kept very short (1 frame @60fps).
+ * CONTACT is held 3 frames so the impact pose is readable — FX bus fires
+ * body recoil / bat vibration / flash with perceivable sustain.
  */
 const BATSMAN_DUR: Record<BatsmanPhase, number> = {
   IDLE:           Infinity,
   BACKLIFT:       0.28,
-  SWING:          0.16,   // bat sweeps through strike zone
-  CONTACT:        0.017,  // ≈ 1 physics frame — aligns with physics hit
+  SWING:          0.22,   // bat sweeps through strike zone (220ms for readable chain)
+  CONTACT:        0.083,  // 5 frames @60fps — above 67ms perceptual threshold; fxBus recoil visible
   FOLLOW_THROUGH: 0.60,
 };
 
@@ -205,6 +210,14 @@ export class BatsmanFSM {
   private _phase:   BatsmanPhase = 'IDLE';
   private _elapsed  = 0;
   private _totalRun = 0;
+
+  // Contact-solution state for time-warped swing
+  private _contactSolution:  ContactSolution | null = null;
+  private _swingStartTotal   = 0;
+  /** Minimum swing duration clamp — prevents instant swings. */
+  private static _MIN_SWING  = 0.050;  // 3 frames @60fps
+  /** Maximum swing duration — prevents frozen hangs. */
+  private static _MAX_SWING  = 0.45;
 
   /**
    * Fires at the start of CONTACT phase.
@@ -221,16 +234,31 @@ export class BatsmanFSM {
 
   get snapshot(): FSMSnapshot<BatsmanPhase> {
     const dur = BATSMAN_DUR[this._phase];
+    let progress: number;
+    if (dur === Infinity) {
+      progress = 0;
+    } else if (this._phase === 'SWING' && this._contactSolution) {
+      // Time-warped swing progress
+      progress = this._timeWarpedSwingProgress();
+    } else {
+      progress = clamp(this._elapsed / dur, 0, 1);
+    }
     return {
       phase:    this._phase,
       elapsed:  this._elapsed,
-      progress: dur === Infinity ? 0 : clamp(this._elapsed / dur, 0, 1),
+      progress,
       runT:     clamp(this._totalRun / BATSMAN_ACTIVE_TOTAL, 0, 1),
     };
   }
 
   get phase(): BatsmanPhase { return this._phase; }
   get isIdle(): boolean { return this._phase === 'IDLE'; }
+
+  /** Expose total run time for GameEngine clock alignment. */
+  get totalRun(): number { return this._totalRun; }
+
+  /** The active ContactSolution, if any. */
+  get contactSolution(): ContactSolution | null { return this._contactSolution; }
 
   // ── Eased progress helpers ───────────────────────────────────────────────────
 
@@ -243,11 +271,14 @@ export class BatsmanFSM {
 
   /**
    * Swing arc (easeOutQuad — fast start, decelerates at contact).
-   * Bat swing easing curve as required by spec.
+   * Uses time-warped progress when ContactSolution is available.
    */
   get swingEased(): number {
     if (this._phase === 'SWING') {
-      return easeOutQuad(clamp(this._elapsed / BATSMAN_DUR.SWING, 0, 1));
+      const t = this._contactSolution
+        ? this._timeWarpedSwingProgress()
+        : clamp(this._elapsed / BATSMAN_DUR.SWING, 0, 1);
+      return easeOutQuad(t);
     }
     if (this._phase === 'CONTACT' || this._phase === 'FOLLOW_THROUGH') return 1;
     return 0;
@@ -271,21 +302,25 @@ export class BatsmanFSM {
 
   /**
    * Begin raising bat in anticipation of delivery.
-   * Ignored if already in an active swing phase.
+   * Resets any active phase so the FSM always starts clean.
    */
   startBacklift(): void {
-    if (this._phase !== 'IDLE') return;
+    if (this._phase !== 'IDLE') this.reset();
     this._totalRun = 0;
+    this._contactSolution = null;
     this._enter('BACKLIFT');
   }
 
   /**
    * User / auto triggers the swing.
+   * Accepts an optional ContactSolution for time-warped swing timing.
    * Drives directly into SWING regardless of backlift progress
    * (short backlift still looks fine for a reactive shot).
    */
-  triggerSwing(): void {
+  triggerSwing(solution?: ContactSolution): void {
     if (this._phase === 'IDLE' || this._phase === 'FOLLOW_THROUGH') return;
+    this._contactSolution = solution ?? null;
+    this._swingStartTotal = this._totalRun;
     this._enter('SWING');
   }
 
@@ -293,6 +328,7 @@ export class BatsmanFSM {
     this._phase    = 'IDLE';
     this._elapsed  = 0;
     this._totalRun = 0;
+    this._contactSolution = null;
   }
 
   /** Advance FSM by `dt` seconds. Call every game tick. */
@@ -301,11 +337,42 @@ export class BatsmanFSM {
     this._elapsed   += dt;
     this._totalRun  += dt;
 
+    if (this._phase === 'SWING' && this._contactSolution) {
+      // Time-warped phase transition: advance to CONTACT when
+      // swing has elapsed enough to reach the predicted contact time.
+      const swingDur = clamp(
+        this._contactSolution.contactTime - this._swingStartTotal,
+        BatsmanFSM._MIN_SWING,
+        BatsmanFSM._MAX_SWING,
+      );
+      if (this._elapsed >= swingDur) {
+        this._advance();
+        return;
+      }
+      // Safety: fall through to normal duration-based advancement
+    }
+
     const dur = BATSMAN_DUR[this._phase];
     if (this._elapsed >= dur) this._advance();
   }
 
   // ── Private ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Time-warped swing progress [0, 1].
+   * Maps elapsed swing time onto the window between swing start and
+   * predicted contact, clamped to prevent extreme values.
+   */
+  private _timeWarpedSwingProgress(): number {
+    const cs = this._contactSolution;
+    if (!cs) return clamp(this._elapsed / BATSMAN_DUR.SWING, 0, 1);
+    const swingDur = clamp(
+      cs.contactTime - this._swingStartTotal,
+      BatsmanFSM._MIN_SWING,
+      BatsmanFSM._MAX_SWING,
+    );
+    return clamp(this._elapsed / swingDur, 0, 1);
+  }
 
   private _enter(phase: BatsmanPhase): void {
     this._phase   = phase;
@@ -315,7 +382,9 @@ export class BatsmanFSM {
 
   private _advance(): void {
     switch (this._phase) {
-      case 'BACKLIFT':       this._enter('SWING');          break;
+      // BACKLIFT is NOT auto-advanced — stays in BACKLIFT until
+      // triggerSwing() transitions to SWING. This aligns CONTACT
+      // with the ball's actual arrival.
       case 'SWING':          this._enter('CONTACT');        break;
       case 'CONTACT':        this._enter('FOLLOW_THROUGH'); break;
       case 'FOLLOW_THROUGH': this._enter('IDLE'); this.onComplete?.(); break;

@@ -22,9 +22,9 @@
   );
 </script>
 
-<header class="hud">
-  <!-- Brushed metal shine line -->
-  <div class="hud-shine" aria-hidden="true"></div>
+<header class="hud crystal-panel">
+  <!-- Animated light sweep (Crystal Gold Luxury) -->
+  <div class="sweep-layer" aria-hidden="true"></div>
 
   <!-- Logo -->
   <div class="hud-logo">
@@ -91,43 +91,17 @@
 
 <style>
   .hud {
-    height: 52px;
+    height: 72px;
     display: flex;
     align-items: center;
-    padding: 0 16px;
+    padding: 0 18px;
     position: relative;
     z-index: 50;
     flex-shrink: 0;
-    /* Brushed metal surface */
-    background:
-      repeating-linear-gradient(
-        90deg,
-        transparent 0px,
-        rgba(255,255,255,0.012) 1px,
-        transparent 2px,
-        transparent 4px
-      ),
-      linear-gradient(180deg, #1c1c28 0%, #0f0f1a 60%, #0a0a14 100%);
-    border-bottom: 1px solid rgba(180, 140, 60, 0.35);
-    box-shadow:
-      0 3px 20px rgba(0, 0, 0, 0.9),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.6);
-  }
-
-  /* Top edge gold shine */
-  .hud-shine {
-    position: absolute;
-    top: 0;
-    left: 40px;
-    right: 40px;
-    height: 1px;
-    background: linear-gradient(90deg,
-      transparent,
-      rgba(200, 160, 80, 0.25),
-      rgba(255, 210, 80, 0.65),
-      rgba(200, 160, 80, 0.25),
-      transparent
-    );
+    overflow: hidden;
+    /* crystal-panel class (from design-tokens.css) supplies the 4-layer composite */
+    border-bottom: 1px solid var(--gold-edge);
+    box-shadow: 0 4px 22px rgba(0, 0, 0, 0.60), 0 1px 0 rgba(255, 184, 0, 0.06);
   }
 
   /* Logo */
@@ -169,8 +143,11 @@
     font-size: 0.9rem;
     font-weight: 900;
     letter-spacing: 0.06em;
-    color: #c8a050;
-    text-shadow: 0 0 18px rgba(200,160,80,0.3), 0 1px 2px rgba(0,0,0,0.8);
+    color: var(--gold-bright);
+    text-shadow:
+      0 0 18px rgba(255, 184, 0, 0.55),
+      0 0 4px rgba(255, 240, 180, 0.45),
+      0 1px 2px rgba(0, 0, 0, 0.8);
   }
 
   /* Vertical separator */
@@ -207,10 +184,10 @@
     font-family: 'Outfit', sans-serif;
     font-size: 0.98rem;
     font-weight: 900;
-    color: #c8a050;
+    color: var(--gold-bright);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.015em;
-    text-shadow: 0 0 18px rgba(200,160,80,0.22);
+    text-shadow: 0 0 22px rgba(255, 184, 0, 0.50);
   }
 
   /* Spacer */

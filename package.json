@@ -5,7 +5,12 @@
   "pnpm": {
     "overrides": {
       "esbuild": "0.25.12"
-    }
+    },
+    "shamefullyHoist": true,
+    "publicHoistPattern": [
+      "@sveltejs/*",
+      "svelte"
+    ]
   },
   "engines": {
     "node": ">=20"
@@ -18,7 +23,7 @@
     "vitest": "^4.1.5"
   },
   "scripts": {
-    "bootstrap": "npx --yes pnpm@10.5.0 install && npm run build:packages",
+    "bootstrap": "npx --yes pnpm@10.5.0 install && npx --yes pnpm@10.5.0 run build:packages",
     "build:packages": "npx --yes pnpm@10.5.0 -r --filter \"./packages/*\" run build",
     "build": "npx --yes pnpm@10.5.0 -r run build",
     "test": "npx --yes pnpm@10.5.0 --filter @cricket-crash/fairness run test",

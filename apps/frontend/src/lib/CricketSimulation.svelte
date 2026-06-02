@@ -3,12 +3,16 @@
   import { EngineBridge } from '../bridge/EngineBridge.js';
   import { bindBridge }   from '../core/gameController.svelte.js';
   import { navigationState } from '../core/navigation.svelte.js';
+  import { preloadAll } from '../game/CharacterManager.js';
 
   let host: HTMLDivElement;
   let engineBridge: EngineBridge | null = null;
   let ro: ResizeObserver | null = null;
 
   onMount(() => {
+    // Kick off all GLB fetches immediately so Renderer._initGlbOverlays hits cache.
+    void preloadAll();
+
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'display:block;width:100%;height:100%;';
     host.appendChild(canvas);
@@ -16,14 +20,12 @@
     const rect = host.getBoundingClientRect();
     const params = new URLSearchParams(window.location.search);
     const debug = params.get('debug') === '1';
-    engineBridge = new EngineBridge(canvas, rect.width || 720, rect.height || 400, { 
+    engineBridge = new EngineBridge(canvas, rect.width || 720, rect.height || 400, {
       debug,
-      batsmanAvatarId: navigationState.selectedAvatarId 
+      batsmanAvatarId: navigationState.selectedAvatarId,
     });
 
-    // Wire engine events → game controller reactive state
     bindBridge(engineBridge);
-
     engineBridge.start();
 
     ro = new ResizeObserver(() => {

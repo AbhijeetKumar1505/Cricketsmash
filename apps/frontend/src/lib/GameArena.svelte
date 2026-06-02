@@ -1,12 +1,9 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import MultiplierDisplay from "./ui/MultiplierDisplay.svelte";
-  import OverTimeline from "./ui/OverTimeline.svelte";
-  import MatchOverOverlay from "./ui/MatchOverOverlay.svelte";
   import RiskIndicator from "./ui/RiskIndicator.svelte";
   import ScorecardOverlay from "./ui/ScorecardOverlay.svelte";
 
-  import type { DeliveryOutcome } from "../core/gameController.svelte.js";
   import type { SkyObjectType } from "../engine/sky/types.js";
 
   type ArenaBroadcastStatus =
@@ -19,8 +16,6 @@
 
   let {
     arenaStatus = "waiting" as ArenaBroadcastStatus,
-    overHistory = [] as DeliveryOutcome[],
-    currentBallIdx = 0,
     accumulatedMult = 1,
     commentaryText = "",
     commentaryKey = 0,
@@ -32,23 +27,16 @@
       key: number;
     },
     scorecardData = null as null | {
-      history: DeliveryOutcome[];
       multiplier: number;
       betAmount: number;
       profit: number;
       wasWicket: boolean;
-      streak: number;
     },
-    lossAmount = 0,
-    onRestart = () => {},
-    onViewStats = () => {},
     /** Shorter hold for autobet (ms) before showing multiplier stage. */
-    resultStage1HoldMs = 1750,
+    resultStage1HoldMs = 1400,
     children,
   }: {
     arenaStatus?: ArenaBroadcastStatus;
-    overHistory?: DeliveryOutcome[];
-    currentBallIdx?: number;
     accumulatedMult?: number;
     commentaryText?: string;
     commentaryKey?: number;
@@ -60,16 +48,11 @@
       key: number;
     };
     scorecardData?: null | {
-      history: DeliveryOutcome[];
       multiplier: number;
       betAmount: number;
       profit: number;
       wasWicket: boolean;
-      streak: number;
     };
-    lossAmount?: number;
-    onRestart?: () => void;
-    onViewStats?: () => void;
     resultStage1HoldMs?: number;
     children: Snippet;
   } = $props();
@@ -342,7 +325,7 @@
         {#key commentaryKey}
           <div class="broadcast-card bc-stage bc-stage-enter">
             <div class="bc-ball-label">
-              BALL {currentBallIdx + 1} &nbsp;·&nbsp; RESULT
+              RESULT
             </div>
             <div
               class="bc-outcome"
@@ -387,33 +370,15 @@
     </div>
   {/if}
 
-  <!-- ─── Over Timeline — visible from first bowl so ball count is always trackable ─── -->
-  {#if !scorecardData && !isCrashed && (arenaStatus === "bowling" || arenaStatus === "hitting" || arenaStatus === "result")}
-    <div class="over-tl-anchor">
-      <OverTimeline currentBall={currentBallIdx} history={overHistory} />
-    </div>
-  {/if}
+  <!-- OverTimeline removed: 1 ball = 1 bet, no over progress to track -->
 
-  <!-- ─── Wicket Overlay (during wicket animation phase only) ─── -->
-  {#if isCrashed}
-    <MatchOverOverlay
-      multiplier={accumulatedMult}
-      {lossAmount}
-      onClose={onRestart}
-      {onViewStats}
-    />
-  {/if}
-
-  <!-- ─── Post-round Scorecard (during broadcast phase) ─── -->
+  <!-- ─── Result overlay (broadcast phase) ─── -->
   {#if scorecardData}
     <ScorecardOverlay
-      history={scorecardData.history}
       multiplier={scorecardData.multiplier}
       betAmount={scorecardData.betAmount}
       profit={scorecardData.profit}
       wasWicket={scorecardData.wasWicket}
-      streak={scorecardData.streak}
-      {onRestart}
     />
   {/if}
 </div>
@@ -657,8 +622,16 @@
   }
 
   .waiting-chip {
-    background: rgba(4, 10, 20, 0.7);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+    background: linear-gradient(180deg,
+      rgba(255, 184, 0, 0.04) 0%,
+      rgba(4, 10, 30, 0.82) 100%);
+    border: 1px solid rgba(255, 184, 0, 0.18) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.55),
+      inset 0 1px 0 rgba(255, 241, 163, 0.08);
   }
 
   @keyframes broadcast-float {

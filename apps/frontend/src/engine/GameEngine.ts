@@ -44,7 +44,10 @@ import { BallController }  from './physics/ballController.js';
 import { HitEngine }       from './physics/hitEngine.js';
 import { BowlerFSM }       from './physics/animationFSM.js';
 import { BatsmanFSM }      from './physics/animationFSM.js';
+import type { BowlerPhase, BatsmanPhase } from './physics/animationFSM.js';
 import { Vec3, mulberry32, makeSeed } from './physics/physics.js';
+import { predictContact } from './physics/BallPredictor.js';
+import type { ContactSolution } from './physics/ContactSolution.js';
 import {
   BATSMAN_CREASE_Z,
   BONUS_SKILL_ZONES,
@@ -68,6 +71,46 @@ export interface FielderSnapState {
   readonly phase: FielderPhase;
 }
 
+/** Bowler FSM snapshot for the animation brain (phase + pre-computed eased progress). */
+export interface BowlerFSMSnapshot {
+  readonly phase:    BowlerPhase;
+  readonly progress: number;   // 0..1 within current phase
+  readonly runT:     number;   // 0..1 across full action
+  readonly eased: {
+    readonly runUp:         number;
+    readonly gather:        number;
+    readonly armSwing:      number;
+    readonly followThrough: number;
+  };
+}
+
+/** Batsman FSM snapshot for the animation brain. */
+export interface BatsmanFSMSnapshot {
+  readonly phase:    BatsmanPhase;
+  readonly elapsed:  number;
+  readonly progress: number;
+  readonly runT:     number;
+  readonly eased: {
+    readonly backlift:      number;
+    readonly swing:         number;
+    readonly contact:       number;
+    readonly followThrough: number;
+  };
+}
+
+/**
+ * Monotonic counters incremented on FSM phase entries.
+ * Renderer/FX bus compare against last-seen value and fire bundles on diff.
+ * Frame-perfect, no setTimeout, no cross-boundary callbacks.
+ */
+export interface SyncEvents {
+  readonly ballReleaseId: number;
+  readonly ballContactId: number;
+  readonly contactBallX: number;
+  readonly contactBallY: number;
+  readonly contactBallZ: number;
+}
+
 export interface EngineSnapshot {
   readonly phase:    string;
   readonly ball:     Readonly<BallData>;
@@ -85,6 +128,19 @@ export interface EngineSnapshot {
   } | null>;
   /** Sky Object Lite (standard mode); null when inactive. */
   readonly skyObject: SkyObjectSnapshot | null;
+  /** Bowler animation FSM mirror — drives BowlingController in the renderer. */
+  readonly bowlerFSM:  BowlerFSMSnapshot;
+  /** Batsman animation FSM mirror — drives BattingController in the renderer. */
+  readonly batsmanFSM: BatsmanFSMSnapshot;
+  /** Frame-perfect sync counters for release/contact event bundles. */
+  readonly syncEvents: SyncEvents;
+  /**
+   * Pre-contact motion target package generated at swing trigger.
+   * Null before swing, or when no prediction was made.
+   * Consumed by BattingController for time-warped swing timing,
+   * contact lock, and environment-responsive procedural layers.
+   */
+  readonly contactSolution: ContactSolution | null;
 }
 
 // ── Input union ───────────────────────────────────────────────────────────────
@@ -157,11 +213,21 @@ export class GameEngine {
     ttl: number;
   } | null = null;
 
+  // ── Current delivery contact solution ─────────────────────────────────────
+  private _contactSolution: ContactSolution | null = null;
+
   // ── Flags ─────────────────────────────────────────────────────────────────
   private swingPending   = false;
   private hitResolved    = false;
   private resultEmitted  = false;
   private _bonusEligible = false;
+
+  // ── Sync event counters (incremented from FSM phase entries) ─────────────
+  private _ballReleaseId = 0;
+  private _ballContactId = 0;
+  private _contactBallX = 0;
+  private _contactBallY = 0;
+  private _contactBallZ = 0;
 
   constructor(matchSeed?: number) {
     this._matchSeed  = matchSeed ?? (Date.now() & 0xffffffff);
@@ -181,9 +247,25 @@ export class GameEngine {
     this.batsmanFSM  = new BatsmanFSM();
     this.physicsCtrl = new BallController(this._rng);
 
-    // Wire FSM callbacks (no circular state mutation — only flag reads)
-    this.bowlerFSM.onRelease = () => { /* ball spawned by BallSystem on BALL_RELEASE state */ };
-    this.batsmanFSM.onContact = () => { /* hit is resolved in tickHit() */ };
+    // Wire FSM callbacks: increment sync counters so the renderer's FX bus
+    // fires bundles on the exact frame the FSM enters RELEASE / CONTACT.
+    this.bowlerFSM.onRelease   = () => { this._ballReleaseId += 1; };
+    this.batsmanFSM.onContact  = () => {
+      this._ballContactId += 1;
+      // Latch the TRUE contact position now — before resolveSwing() relaunches
+      // the ball with hit velocity. The post-relaunch ball departs immediately
+      // (a loft shoots upward), so the live snapshot ball is NOT the contact point.
+      this._contactBallX = this.ball.x;
+      this._contactBallY = this.ball.y;
+      this._contactBallZ = this.ball.z;
+      // Drive gameplay resolution from the same frame as visual contact.
+      // If state is still BALL_TRAVEL (FSM fired fractionally early), force
+      // the HIT transition so resolveSwing()'s BALL_RESULT transition is valid.
+      if (this.swingPending && !this.hitResolved) {
+        if (this.sm.is(GameState.BALL_TRAVEL)) this.sm.transition(GameState.HIT);
+        this.resolveSwing();
+      }
+    };
 
     this._fielderStates = FIELDER_SLOTS.map(s => ({ x: s.x, z: s.z, phase: 'idle' as FielderPhase }));
   }
@@ -237,6 +319,8 @@ export class GameEngine {
   }
 
   getSnapshot(): EngineSnapshot {
+    const bSnap = this.bowlerFSM.snapshot;
+    const tSnap = this.batsmanFSM.snapshot;
     return {
       phase:    this.sm.phase,
       ball:     this.ball,
@@ -255,12 +339,47 @@ export class GameEngine {
           }
         : null,
       skyObject: this._skySys.snapshot,
+      bowlerFSM: {
+        phase:    bSnap.phase,
+        progress: bSnap.progress,
+        runT:     bSnap.runT,
+        eased: {
+          runUp:         this.bowlerFSM.runUpEased,
+          gather:        this.bowlerFSM.gatherEased,
+          armSwing:      this.bowlerFSM.armSwingEased,
+          followThrough: this.bowlerFSM.followThroughEased,
+        },
+      },
+      batsmanFSM: {
+        phase:    tSnap.phase,
+        elapsed:  tSnap.elapsed,
+        progress: tSnap.progress,
+        runT:     tSnap.runT,
+        eased: {
+          backlift:      this.batsmanFSM.backliftEased,
+          swing:         this.batsmanFSM.swingEased,
+          contact:       this.batsmanFSM.contactImpact,
+          followThrough: this.batsmanFSM.followThroughEased,
+        },
+      },
+      syncEvents: {
+        ballReleaseId: this._ballReleaseId,
+        ballContactId: this._ballContactId,
+        contactBallX:  this._contactBallX,
+        contactBallY:  this._contactBallY,
+        contactBallZ:  this._contactBallZ,
+      },
+      contactSolution: this._contactSolution,
     };
   }
 
   // ── Private: phase logic ───────────────────────────────────────────────────
 
   private startBowl(outcome: DeliveryOutcome, intent?: DeliveryIntent): void {
+    // Ensure engine is in IDLE before starting a new delivery.
+    // Prevents stale RESET → BETTING transition when the game controller
+    // calls triggerBowl before triggerReset has been processed.
+    if (!this.sm.is(GameState.IDLE)) this.resetToIdle();
     if (!this.sm.transition(GameState.BETTING)) return;
     if (!this.sm.transition(GameState.BOWLER_RUNUP)) return;
 
@@ -269,6 +388,7 @@ export class GameEngine {
     this.resultEmitted  = false;
     this._bonusEligible = false;
     this._skyImpactEmitted = false;
+    this._contactSolution = null;
     this.currentShot    = this.outcomeSys.toShotResult(outcome);
 
     // M6: publish delivery intent on the per-character anim states so the
@@ -343,8 +463,24 @@ export class GameEngine {
     if (this.swingPending) return;
     if (this.sm.is(GameState.BALL_TRAVEL) || this.sm.is(GameState.HIT)) {
       this.swingPending = true;
-      // Trigger batsman FSM swing (animation-only; physics resolved in tickHit)
-      this.batsmanFSM.triggerSwing();
+
+      // ── Generate ContactSolution from current ball state ─────────────────
+      // Predict when and where the ball will reach the batsman, then convert
+      // to FSM-clock-relative timing so the animation system can synchronize.
+      this._contactSolution = predictContact(
+        this.ball.params!.hitTime,
+        this.ball.elapsed,
+        this.batsmanFSM.totalRun,
+        this.ball.y,   // current ball height — used for dynamic contactY projection
+        this.ball.vy,  // current vertical velocity — determines trajectory arc
+        this.ball.x,   // horizontal position → projected contact X
+        this.ball.z,   // depth position → projected contact Z (in front of crease)
+        this.ball.vx,
+        this.ball.vz,
+      );
+
+      // Trigger batsman FSM swing with the contact solution for time-warped timing
+      this.batsmanFSM.triggerSwing(this._contactSolution);
     }
   }
 
@@ -368,7 +504,11 @@ export class GameEngine {
       );
     }
 
-    const quality        = hitOut.quality !== 'miss' ? legacy : 'miss';
+    // Server outcome is the single source of truth.
+    // If the delivery was pre-planned as a hit, auto-swing timing jitter must
+    // never override it to a wicket — the animation is cosmetic.
+    const rawQuality     = hitOut.quality !== 'miss' ? legacy : 'miss';
+    const quality        = (params.outcome === 'hit' && rawQuality === 'miss') ? 'good' : rawQuality;
     const resolvedBucket = quality === 'miss' ? 'wicket' : params.bucket;
     this._bonusEligible = resolvedBucket !== 'wicket' && !this._skyActive;
 
@@ -443,6 +583,15 @@ export class GameEngine {
 
   private tickHit(): void {
     if (this.hitResolved) return;
+    // When a swing was registered, resolveSwing() fires from batsmanFSM.onContact
+    // so gameplay resolution aligns with visual contact in the same frame.
+    // Safety: if FSM never reaches CONTACT within 400ms (shouldn't happen),
+    // force-resolve to prevent an infinite hang in HIT state.
+    if (this.swingPending) {
+      if (this.sm.phaseTime > 0.4) this.resolveSwing();
+      return;
+    }
+    // No swing registered — resolve immediately (wicket / no-shot miss).
     this.resolveSwing();
   }
 
@@ -604,6 +753,7 @@ export class GameEngine {
     this.hitResolved    = false;
     this.resultEmitted  = false;
     this._bonusEligible = false;
+    this._contactSolution = null;
     this.currentShot    = null;
     this.physicsCtrl.stop();
     this.bowlerFSM.reset();

@@ -3,22 +3,25 @@ import type { BonusType } from '../../engine/events/EventBus.js';
 
 export class ImpactJuice {
   private _freeze = 0;
+  private _freezeDuration = 0;
   private _zoom = 0;
   private _chromatic = 0;
   private _shake = new THREE.Vector3();
 
   triggerBonusImpact(_type: BonusType, _worldPos: { x: number; y: number; z: number }): void {
     this._freeze = 0.12;
-    this._zoom = 0.85;
+    this._freezeDuration = 0.12;
+    this._zoom = 2.0;
     this._chromatic = 1.0;
     this._shake.set((Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.1, 0);
   }
 
   triggerHitImpact(): void {
-    this._freeze = 0.08;
-    this._zoom = 0.45;
-    this._chromatic = 0.6;
-    this._shake.set((Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.06, 0);
+    this._freeze = 0.10;
+    this._freezeDuration = 0.10;
+    this._zoom = 1.5;
+    this._chromatic = 0.8;
+    this._shake.set((Math.random() - 0.5) * 0.20, (Math.random() - 0.5) * 0.10, 0);
   }
 
   update(dt: number): void {
@@ -29,11 +32,18 @@ export class ImpactJuice {
   }
 
   get timeScale(): number {
-    return this._freeze > 0 ? 0.22 : 1;
+    if (this._freeze <= 0) return 1;
+    const progress = 1 - this._freeze / this._freezeDuration;
+    // First 70%: full freeze at 0.12× speed
+    // Last 30%: ease-out recovery to 1.0× (cubic ease-out prevents pop-back)
+    if (progress < 0.7) return 0.12;
+    const recoveryT = (progress - 0.7) / 0.3;
+    const eased = 1 - Math.pow(1 - recoveryT, 3);
+    return 0.12 + (1 - 0.12) * eased;
   }
 
   get zoomOffset(): number {
-    return this._zoom * 0.8;
+    return this._zoom;
   }
 
   get chromaticIntensity(): number {

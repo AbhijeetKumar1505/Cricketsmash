@@ -7,7 +7,9 @@
     "moduleResolution": "bundler",
     "paths": {
       "@cricket-crash/types": ["../../packages/types/src/index.ts"],
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "three": ["../../node_modules/.pnpm/@types+three@0.183.1/node_modules/@types/three"],
+      "three/*": ["../../node_modules/.pnpm/@types+three@0.183.1/node_modules/@types/three/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]

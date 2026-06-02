@@ -97,12 +97,14 @@ function reconcileProduct(
     telemetry.push({ kind: 'cap_clamped', payload: { ball: adjustIdx, before: factors[adjustIdx] / ratio } });
     factors[adjustIdx] = CAP_SINGLE_BALL_MULTIPLIER;
     p = product(factors);
-    // Second pass: spread remainder on previous balls
+    // Second pass: spread remainder on previous balls, recomputing the ratio each
+    // iteration so a prior adjustment doesn't overshoot and push the product
+    // past the target in the wrong direction.
     if (Math.abs(p - target) > DECOMPOSE_EPSILON && adjustIdx > 0) {
-      const ratio2 = target / p;
       for (let j = adjustIdx - 1; j >= 0 && Math.abs(product(factors) - target) > DECOMPOSE_EPSILON; j--) {
-        const next = clamp(factors[j]! * ratio2, 0.01, CAP_SINGLE_BALL_MULTIPLIER);
-        factors[j] = next;
+        const curP = product(factors);
+        const r2 = target / curP;
+        factors[j] = clamp(factors[j]! * r2, 0.01, CAP_SINGLE_BALL_MULTIPLIER);
       }
     }
   }
@@ -150,15 +152,47 @@ export function decomposeRound(options: DecomposeOptions): DecomposeResult {
     });
   }
 
+  // Wicket check must come BEFORE mode routing — a zero/negative payout is always
+  // a wicket regardless of mode. The old order let POWERPLAY swallow payoutMultiplier=0
+  // and route it to decomposePowerplay, which cannot reconcile to a zero target and
+  // returned a bogus positive-factor ball instead of a catch_out.
+  if (payoutMultiplier <= 0) {
+    if (mode === GAME_MODES.POWERPLAY) {
+      return decomposePowerplayWicket(betID, mode, telemetry);
+    }
+    return decomposeWicketOver(betID, mode, telemetry);
+  }
+
   if (mode === GAME_MODES.POWERPLAY) {
     return decomposePowerplay(targetMult, betID, mode, telemetry, options);
   }
 
-  if (payoutMultiplier <= 0) {
-    return decomposeWicketOver(betID, mode, telemetry);
-  }
-
   return decomposePositiveOver(targetMult, betID, mode, telemetry, options);
+}
+
+function decomposePowerplayWicket(
+  _betID: number,
+  mode: GameModeName,
+  telemetry: DecomposeTelemetryEvent[],
+): DecomposeResult {
+  return {
+    payoutMultiplier: 0,
+    mode,
+    balls: [{
+      index: 0,
+      key: 'catch_out',
+      factor: 0,
+      runs: 0 as CricketRuns,
+      flags: {
+        skyOverride: false,
+        streakOverride: false,
+        residualAdjusted: false,
+        capClamped: false,
+      },
+    }],
+    product: 0,
+    telemetry,
+  };
 }
 
 function decomposePowerplay(

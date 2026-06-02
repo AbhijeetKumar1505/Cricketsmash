@@ -20,11 +20,8 @@ export const API_MULTIPLIER = 1_000_000;
 export { DisplayAmount, ParseAmount };
 export type { Balance, Currency, AuthenticateConfig, JurisdictionFlags, Round };
 
-// ── Cricket Crash bet mode names ────────────────────────────────────────────
+// ── Cricket Crash bet mode — single-delivery only ───────────────────────────
 export const GAME_MODES = {
-  /** Standard 6-delivery over */
-  OVER: 'OVER',
-  /** Single-delivery high-risk round */
   POWERPLAY: 'POWERPLAY',
 } as const;
 export type GameModeName = (typeof GAME_MODES)[keyof typeof GAME_MODES];
@@ -107,7 +104,7 @@ export function createStakeClient(): StakeGameClient {
       };
     },
 
-    async play(amount: number, mode: GameModeName = GAME_MODES.OVER): Promise<PlayResult> {
+    async play(amount: number, mode: GameModeName = GAME_MODES.POWERPLAY): Promise<PlayResult> {
       if (!client) throw new Error('StakeClient not initialized. Call init() first.');
 
       const response: PlayResponse = await client.Play({ amount, mode });
