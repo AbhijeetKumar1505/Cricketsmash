@@ -12,7 +12,7 @@ const INNER_R = 18;
 const TIER_STEP_R = 2.4;
 const TIER_STEP_H = 1.5;
 const TIERS = 2;
-const PEOPLE_PER_TIER = 3;
+const PEOPLE_PER_TIER = 7;
 const BOUNDARY_R = 14;
 const SKIP_SIN_THRESHOLD = 0.45;
 
@@ -237,6 +237,10 @@ function makeScoreboardTexture(
 
 type CrowdSprite = {
   mesh: THREE.Mesh;
+  mat: THREE.MeshBasicMaterial;
+  idleTex: THREE.Texture;
+  celebTex: THREE.Texture;
+  celebrating: boolean;
   basePosition: THREE.Vector3;
   scale: number;
   phase: number;
@@ -274,6 +278,8 @@ export class StadiumEntity {
   private readonly _activities: StadiumActivitySystem;
   /** Extra Mexican-wave amplitude after boundaries (decays). */
   private _crowdWaveBoost = 0;
+  /** Countdown in seconds for jump celebration (six/four). */
+  private _reactionTimer = 0;
 
   constructor(assets: DoodleAssets) {
     this.root = new THREE.Group();
@@ -288,7 +294,6 @@ export class StadiumEntity {
     this.buildSponsorBoards();
     this.buildStands();
     this.buildStandRailings();
-    this.buildCrowdBackdrop();
     this.buildCrowd(assets);
     this.buildFloodlightTowers();
     this.buildForegroundTufts();
@@ -321,6 +326,7 @@ export class StadiumEntity {
     this._time += dt;
 
     this._crowdWaveBoost = Math.max(0, this._crowdWaveBoost - dt * 0.45);
+    this._reactionTimer = Math.max(0, this._reactionTimer - dt);
 
     const ribbonPhase =
       enginePhase === GameState.BOWLER_RUNUP ||
@@ -339,14 +345,30 @@ export class StadiumEntity {
       const bobAmp = 0.06 + 0.14 * this._crowdWaveBoost;
       const bob  = wave * bobAmp + Math.sin(this._time * 1.8 + sprite.phase) * 0.009;
       const sway = Math.sin(this._time * 1.4 + sprite.phase) * 0.022;
+
+      // Staggered jump — ripples around stadium by azimuth so celebration is a wave
+      const normalizedAngle = ((sprite.angle / (Math.PI * 2)) + 1) % 1;
+      const staggerOffset = normalizedAngle * 0.4;
+      const staggeredT = Math.max(0, this._reactionTimer - staggerOffset);
+      const jumpT = Math.min(1, staggeredT * 2.5);
+      const jumpH = Math.sin(jumpT * Math.PI) * 0.45;
+
       sprite.mesh.position.set(
         sprite.basePosition.x + sway,
-        sprite.basePosition.y + bob,
+        sprite.basePosition.y + bob + jumpH,
         sprite.basePosition.z + Math.cos(this._time * 1.1 + sprite.phase) * 0.012,
       );
       const scalePulse = 0.05 + 0.12 * this._crowdWaveBoost;
       sprite.mesh.scale.setScalar(sprite.scale * (1 + wave * scalePulse));
       if (camera) sprite.mesh.lookAt(camera.position);
+
+      // Swap texture between idle/celebrate when state changes
+      const shouldCelebrate = jumpT > 0.08;
+      if (shouldCelebrate !== sprite.celebrating) {
+        sprite.celebrating = shouldCelebrate;
+        sprite.mat.map = shouldCelebrate ? sprite.celebTex : sprite.idleTex;
+        sprite.mat.needsUpdate = true;
+      }
     }
 
     for (const cloud of this._clouds) {
@@ -382,12 +404,21 @@ export class StadiumEntity {
     this._sponsorRibbon.triggerEvent(kind);
     if (kind === 'six') {
       this._activities.triggerConfetti();
-      this._crowdWaveBoost = 1;
+      this._crowdWaveBoost = 1.5;
+      this._reactionTimer = 2.2;
     } else if (kind === 'four') {
-      this._crowdWaveBoost = 0.55;
-    }
-    if (kind === 'wicket' || kind === 'miss') {
+      this._crowdWaveBoost = 0.85;
+      this._reactionTimer = 1.2;
+    } else if (kind === 'wicket' || kind === 'miss') {
       this._activities.setExcitement(0.12);
+      this._reactionTimer = 0;
+      for (const sprite of this._crowdSprites) {
+        if (sprite.celebrating) {
+          sprite.celebrating = false;
+          sprite.mat.map = sprite.idleTex;
+          sprite.mat.needsUpdate = true;
+        }
+      }
     }
   }
 
@@ -606,6 +637,36 @@ export class StadiumEntity {
     const rng = (seed: number) =>
       ((seed * 1664525 + 1013904223) & 0x7fffffff) / 0x7fffffff;
 
+    const addSprite = (
+      angle: number, px: number, py: number, pz: number,
+      scale: number, seed: number, geomW: number, geomH: number,
+    ) => {
+      const texIdx = (seed) % assets.audience.length;
+      const idleTex = assets.audience[texIdx]!;
+      const celebTex = assets.audienceCelebrate[texIdx]!;
+      const mat = new THREE.MeshBasicMaterial({
+        map: idleTex,
+        transparent: true,
+        alphaTest: 0.05,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        opacity: 0.88,
+      });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(geomW, geomH), mat);
+      mesh.position.set(px, py, pz);
+      mesh.rotation.y = (rng(seed + 13) - 0.5) * 0.4;
+      mesh.scale.setScalar(scale);
+      this._crowd.add(mesh);
+      this._crowdSprites.push({
+        mesh, mat, idleTex, celebTex, celebrating: false,
+        basePosition: mesh.position.clone(),
+        scale,
+        phase: rng(seed + 3) * Math.PI * 2,
+        angle,
+      });
+    };
+
+    // Main tiers (2 rings)
     for (let s = 0; s < STAND_SECTIONS; s++) {
       const baseAngle = (s / STAND_SECTIONS) * Math.PI * 2;
       if (Math.sin(baseAngle) > SKIP_SIN_THRESHOLD) continue;
@@ -621,31 +682,27 @@ export class StadiumEntity {
           const px = Math.cos(angle) * r;
           const pz = MID_Z + Math.sin(angle) * r;
           const scale = 0.72 + rng(seed + 1) * 0.24;
-          const hue = 0.08 + rng(seed + 7) * 0.72;
-          const sat = 0.45 + rng(seed + 9) * 0.25;
-          const lit = 0.45 + rng(seed + 11) * 0.2;
-          const mat = new THREE.MeshBasicMaterial({
-            map: assets.audience[(seed + p + tier) % assets.audience.length],
-            transparent: true,
-            alphaTest: 0.05,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-            opacity: 0.74,
-          });
-          mat.color = new THREE.Color().setHSL(hue, sat, lit);
-          const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.55), mat);
-          mesh.position.set(px, py, pz);
-          mesh.rotation.y = (rng(seed + 13) - 0.5) * 0.4;
-          mesh.scale.setScalar(scale);
-          this._crowd.add(mesh);
-          this._crowdSprites.push({
-            mesh,
-            basePosition: mesh.position.clone(),
-            scale,
-            phase: rng(seed + 3) * Math.PI * 2,
-            angle: Math.atan2(pz - MID_Z, px),
-          });
+          addSprite(angle, px, py, pz, scale, seed, 0.50, 0.88);
         }
+      }
+    }
+
+    // Upper deck (tier 2) — smaller, further back, 6 per section
+    for (let s = 0; s < STAND_SECTIONS; s++) {
+      const baseAngle = (s / STAND_SECTIONS) * Math.PI * 2;
+      if (Math.sin(baseAngle) > SKIP_SIN_THRESHOLD) continue;
+
+      const r = INNER_R + 2 * TIER_STEP_R + 0.5;
+      const py = TIER_STEP_H + 2 * TIER_STEP_H + 0.55;
+
+      for (let p = 0; p < 6; p++) {
+        const seed = s * 100 + 20 + p;
+        const frac = (p + 0.5) / 6;
+        const angle = baseAngle + (frac - 0.5) * sectionArc + (rng(seed) - 0.5) * 0.05;
+        const px = Math.cos(angle) * r;
+        const pz = MID_Z + Math.sin(angle) * r;
+        const scale = (0.60 + rng(seed + 1) * 0.18) * 0.75;
+        addSprite(angle, px, py, pz, scale, seed, 0.42, 0.72);
       }
     }
   }
@@ -761,49 +818,6 @@ export class StadiumEntity {
         look.set(0, py, MID_Z);
         rail.lookAt(look);
         this.root.add(rail);
-      }
-    }
-  }
-
-  private buildCrowdBackdrop(): void {
-    const sectionAngle = (Math.PI * 2) / STAND_SECTIONS;
-    // Super-vibrant palette — six saturated bands cycled around the stands.
-    const lowerColors = [
-      0xffb800,   // gold
-      0x00e7ff,   // electric cyan
-      0xff5566,   // hot coral
-      0xa864ff,   // royal purple
-      0x00ff99,   // neon green
-      0x3088dd,   // saturated blue
-    ];
-    const upperColor  = 0x2a5cb8;
-    const look = new THREE.Vector3();
-
-    for (let s = 0; s < STAND_SECTIONS; s++) {
-      const angle = (s / STAND_SECTIONS) * Math.PI * 2;
-      if (Math.sin(angle) > SKIP_SIN_THRESHOLD) continue;
-
-      const colorIdx = Math.floor(s / Math.ceil(STAND_SECTIONS / lowerColors.length)) % lowerColors.length;
-
-      for (let tier = 0; tier < TIERS; tier++) {
-        const isUpper = tier >= TIERS - 1;
-        const r = INNER_R + tier * TIER_STEP_R + 1.0;
-        const py = TIER_STEP_H + tier * TIER_STEP_H + 0.55;
-        const chordW = 2 * r * Math.tan(sectionAngle / 2) * 1.02;
-
-        const strip = new THREE.Mesh(
-          new THREE.PlaneGeometry(chordW, TIER_STEP_H * 0.88),
-          new THREE.MeshBasicMaterial({
-            color: isUpper ? upperColor : lowerColors[colorIdx]!,
-            transparent: true,
-            opacity: isUpper ? 0.72 : 0.84,  // upper fades toward sky
-            depthWrite: false,
-          }),
-        );
-        strip.position.set(Math.cos(angle) * r, py, MID_Z + Math.sin(angle) * r);
-        look.set(0, py, MID_Z);
-        strip.lookAt(look);
-        this.root.add(strip);
       }
     }
   }

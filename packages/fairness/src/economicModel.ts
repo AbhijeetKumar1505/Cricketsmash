@@ -53,11 +53,11 @@ export interface MathProfile {
 /** Weights sum to 1. RTP ≈ 0.95 (spec target 94–96%). */
 export const STANDARD_PROFILE: MathProfile = {
   outcomes: [
-    { key: 'six', multiplier: 2.0, weight: 0.05 },
-    { key: 'four', multiplier: 1.75, weight: 0.07 },
-    { key: 'triple', multiplier: 1.36, weight: 0.09 },
-    { key: 'double', multiplier: 1.16, weight: 0.13 },
-    { key: 'single', multiplier: 1.08, weight: 0.15 },
+    { key: 'six', multiplier: 4.5, weight: 0.05 },
+    { key: 'four', multiplier: 3.0, weight: 0.07 },
+    { key: 'triple', multiplier: 1.8, weight: 0.09 },
+    { key: 'double', multiplier: 1.5, weight: 0.13 },
+    { key: 'single', multiplier: 1.1, weight: 0.15 },
     { key: 'dot', multiplier: 0.9, weight: 0.2 },
     { key: 'good_fielding', multiplier: 0.7, weight: 0.16 },
     { key: 'catch_out', multiplier: 0, weight: 0.15 },
@@ -72,28 +72,28 @@ export const STANDARD_PROFILE: MathProfile = {
 /** Bonus buy / Powerplay profile — spec section 11 (table illustration). */
 export const BONUS_BUY_PROFILE: MathProfile = {
   outcomes: [
-    { key: 'six', multiplier: 2.25, weight: 0.11 },
-    { key: 'four', multiplier: 1.85, weight: 0.15 },
-    { key: 'triple', multiplier: 1.4, weight: 0.11 },
-    { key: 'double', multiplier: 1.18, weight: 0.16 },
-    { key: 'single', multiplier: 1.08, weight: 0.2 },
+    { key: 'six', multiplier: 5.0, weight: 0.11 },
+    { key: 'four', multiplier: 3.5, weight: 0.15 },
+    { key: 'triple', multiplier: 2.0, weight: 0.11 },
+    { key: 'double', multiplier: 1.6, weight: 0.16 },
+    { key: 'single', multiplier: 1.1, weight: 0.2 },
     { key: 'dot', multiplier: 0.9, weight: 0.15 },
     { key: 'good_fielding', multiplier: 0.7, weight: 0.03 },
     { key: 'catch_out', multiplier: 0, weight: 0.09 },
   ],
   sky: {
-    chance: 0.12,
-    weights: { jetpack: 0.75, smallPlane: 0.22, bigPlane: 0.03 },
+    chance: 0.25,  // was 0.12; bonus buy gets 25% sky object contact probability
+    weights: { jetpack: 0.70, smallPlane: 0.25, bigPlane: 0.05 },  // slightly more planes
     multipliers: { jetpack: 10, smallPlane: 10, bigPlane: 100 },
   },
 };
 
-/** Boundary streak ladder — spec section 10. */
+/** Boundary streak ladder — hat-trick bonus for 3+ consecutive 4s or 6s. */
 export const STREAK_OVERRIDE_MULTIPLIERS: Record<number, number> = {
-  3: 3,
-  4: 4,
-  5: 5,
-  6: 8,
+  3: 10,
+  4: 12,
+  5: 15,
+  6: 20,
 };
 
 /** Hard caps — risk operations (plan Phase 2). */

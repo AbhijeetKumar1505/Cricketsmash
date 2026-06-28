@@ -162,6 +162,19 @@ export class BallSystem {
     return ball.z >= WORLD.BATSMAN_Z - 0.15;
   }
 
+  /**
+   * Deterministic ball position at the moment it reaches the batsman — i.e. the
+   * real contact point. Sampling the trajectory at the isAtBatsman threshold
+   * (z = BATSMAN_Z − 0.15) gives x≈0, y≈HIT_Y, z≈−0.15, matching the latched true
+   * contact. Used by BallPredictor so the IK aims where the ball actually arrives,
+   * not at a velocity projection (velocities aren't maintained pre-hit).
+   */
+  contactSample(params: BowlParams): { x: number; y: number; z: number } {
+    const zHit = WORLD.BATSMAN_Z - 0.15;
+    const n = (zHit - WORLD.RELEASE_Z) / (WORLD.BATSMAN_Z - WORLD.RELEASE_Z);
+    return computePreHitPosition(n * params.hitTime, params);
+  }
+
   deactivate(ball: BallData): void {
     ball.active = false;
     ball.predictedLanding = null;

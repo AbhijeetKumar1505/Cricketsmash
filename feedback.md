@@ -163,6 +163,165 @@ Previous values (SPINE/CHEST = 0.47 each) gave 147° total — the "bowling arou
 
 ---
 
+## Guard Stance (IDLE) — two coupled regressions to never repeat
+
+The IDLE batsman ended up bolt-upright with the bat dangling at his feet. Two
+independent edits to `BattingController` caused it:
+
+**1. `_idleArmGuard` must pose the RIGHT arm, not just the left.** The bat is
+parented to the `rightHand` bone in the Renderer. On this Meshy rig the right
+arm's bind pose hangs ~106° out to the side, so if IDLE leaves the right arm at
+bind the bat dangles at the feet, then snaps into a real guard on IDLE→BACKLIFT.
+`_idleArmGuard` must apply the SAME rest deltas `_backlift` uses at `lift=0`
+(`rightArm -0.32,0,-0.58` · `rightForeArm 0.58,0,-0.24` · `rightHand 0.06,0,-0.16`
+plus the left-arm pair). These are PROVEN axes (do not guess) and double as a
+seamless IDLE→BACKLIFT hand-off with no right-arm snap.
+
+**2. `_applyGuardWithStance` must supply the ~`+0.10 spine` / `+0.10 head` lean
+base.** The CONTACT and FOLLOW_THROUGH code is tuned against that base — its own
+inline comments say "guard +0.10 spine base", "guard stance's forward lean
+(+0.10 head)". A well-meaning "straight upright stance — bind pose defines lean"
+edit removed the base and SILENTLY de-tuned every contact/follow-through pose
+(head folded into the chest, etc.), not just idle. Restore: `spine +0.10`,
+`chest +0.06`, `head +0.10`, tiny `hips` pelvis tilt — moderate so total world
+rotation stays well under the "bowling lean" threshold.
+
+**Lesson:** the guard stance is a shared BASE that the per-phase poses add onto.
+Changing it re-tunes every phase. If you flatten it, grep the phase code for
+"guard +0.10" comments first.
+
+## Bat Body Clearance — move the bat off the torso WITHOUT breaking contact
+
+The guard bat read as "buried in the body". Source constant in `batGeometry.ts`:
+
+```typescript
+BAT_BODY_CLEARANCE = new THREE.Vector3(0.12, -0.08, 0)  // WORLD axes: +X off the
+                                                        // torso, −Y down
+batClearanceWeight(phase, progress)  // 1 at rest → eased to 0 across BACKLIFT
+                                     // → 0 in SWING/CONTACT/FOLLOW_THROUGH
+```
+
+**Apply it by moving the right HAND, not the bat mesh.** The bat is rigidly
+parented to `rightHand` (Renderer), AND the left-hand weld derives its handle
+point from the right-hand pose. So a single right-hand nudge carries the bat out
+and BOTH hands follow it. Implemented as a reach post-pass mirroring the left
+weld:
+
+- `BatTargetIK.solveRightGripPost()` — `reachTwoBoneInPlace` drives `rightHand`
+  to `currentWorldPos + BAT_BODY_CLEARANCE·weight`. MUST run BEFORE
+  `solveLeftGripPost` (in `AnimationBrain`) so the top-hand weld reads the
+  already-lifted bat. Bones reset to bind next frame → nothing accumulates.
+- The Renderer does NOT offset the bat mesh, and `solveLeftGripPost` does NOT
+  re-add the clearance — applying it in more than one place would double it.
+
+**Why gated to 0 through SWING/CONTACT:** `batClearanceWeight` zeroes the reach
+before the swing, so it never fights the contact IK (blade-on-ball) or perturbs
+the sweet-spot telemetry. The right-hand reach and the contact reach are thus
+fully time-disjoint.
+
+**Why NOT offset the bat mesh directly (the rejected first attempt):** the bat is
+rigid to the right hand, which is a raw animation bone (not IK-welded). Offsetting
+the mesh moves it relative to the bottom hand → at 0.12 the grip sat ~13 cm off
+the right palm (detached). Moving the hand instead keeps `rightHand→grip` at the
+correct `BAT_GRIP_SEAT` (0.085 m) — verify with `window.__anim.dumpBat()`
+(`rightHand` vs `grip` ≈ 0.085).
+
+**Live tuning:** `window.__batClear = [x, y, z]` (sole consumer is
+`solveRightGripPost`; bat + both hands move together).
+
+## Idle Bat Carry — four anatomical setters, dialed live by the user
+
+The resting bat hold went through several wrong guesses (dangling down; raised
+up-and-FORWARD; raised up-and-BACK — "at the back"; up-and-to-the-off-side at 45° —
+"not precise"). What finally worked: stop guessing the *pose* and instead expose the
+four arm joints as independent setters so the user dials it themselves.
+
+**The four axes (each found EMPIRICALLY on this Meshy rig via the close-up +
+`dumpBat()` — never guessed):**
+  - **SHOULDER = `−rightArm.z`** (`window.__guardLift`) — raises/lowers the bat.
+  - **ELBOW = `rightForeArm.x`** (`window.__guardElbow`) — bends the elbow; negative
+    EXTENDS the arm so the bat drops down in front.
+  - **WRIST = `−rightHand.z`** (`window.__guardCock`) — tilts the blade up/down.
+  - **SWEEP = `rightHand.y`** (`window.__guardYaw`) — rotates the bat HORIZONTALLY
+    around the vertical/head axis. This is the ONLY arm axis that sweeps sideways
+    (blade height stays ~constant while X/Z swing); `rightArm.y` looks like it should
+    but just adds another vertical tilt. Key lesson: for a horizontal sweep use the
+    WRIST (`rightHand.y`), not the shoulder.
+
+`_idleArmGuard` applies the proven flat rest deltas, then these four. Defaults (the
+user's chosen guard — bat down in front of the body): `IDLE_RAISE_DEFAULT 0.00`,
+`IDLE_ELBOW_DEFAULT −1.50`, `IDLE_COCK_DEFAULT −1.50`, `IDLE_YAW_DEFAULT 0.00`.
+
+**Tuning method that ended the guessing loop:** a DEV-only on-screen slider panel
+(`buildBatTunePanel`, since removed) writing the `window.__guard*` knobs that
+`_idleArmGuard` reads each frame. The user dragged the sliders in their own preview
+and sent back the `{lift, elbow, cock, yaw}` JSON; those were baked as the defaults.
+Far faster than trading annotated screenshots. The `window.__guard*` console knobs
+remain for future tuning.
+
+**Kill the IDLE→BACKLIFT snap by EASING all four out across the backlift** (not a
+value remap — the idle pose is not a sub-pose of the backlift). The BACKLIFT case
+adds each setter scaled by `idleOut = 1 − fsm.eased.backlift` on top of the normal
+`_backlift(fsm.eased.backlift, …)`: entry (`eased=0`) = idle pose, `eased=1` = pure
+backlift. `_captureBackliftFinal` (t=1) and the swing are untouched (verified: a full
+delivery runs with `rigMax` stable at 2.70 and contact metrics in range).
+
+**Close-up debugging tool (essential — the batsman is a thumbnail at gameplay
+distance).** The bat hold is impossible to judge from the broadcast camera. Renderer
+exposes (DEV only) `window.__cam` / `window.__scene` / `window.__renderOnce()`. To
+inspect: lock the camera by overriding `cam.updateMatrixWorld` to re-assert a chosen
+`position`+`lookAt` every frame (the game loop sets the camera each frame, so a plain
+`position.set` gets overwritten; the override wins). Restore by putting the original
+`updateMatrixWorld` back. GOTCHA: after an HMR reload the Renderer re-instantiates, so
+re-grab `window.__cam` (a stale closure locks an orphaned, un-rendered camera).
+
+**Grip-tightness gotcha — `dumpBat().handGap_m` is the wrong metric.** It measures
+wrist-BONE to wrist-BONE distance, which is dominated by `BAT_GRIP_SEAT` (0.085 m,
+bone→grip), NOT by how close the hands look on the handle. The visual grip-point
+spacing is `LEFT_GRIP_GAP` plus `LEFT_GRIP_WORLD_OFFSET` (tightened toward 0). Judge
+grip by eye + `window.__leftGripDbg.dist_m`, not `handGap_m`.
+
+## Left (top) hand grip — orientation MIRROR + clavicle reach (the "right hand is ok,
+left needs fixing" pass)
+
+The right hand always looks right because the bat is PARENTED to it (its world quat IS
+the bat). The left hand is IK-welded and was wrong two ways — both fixed in
+`BatTargetIK.solveLeftGripPost`:
+
+**1. Orientation: mirror the right hand, don't use a static wrap.** The old code only
+added a fixed `LEFT_HAND_WRAP` euler to the left wrist, so the palm faced the wrong
+way. Now the left hand's WORLD quaternion is set FROM the right-hand world quat:
+`leftHand.quaternion = inv(parentWorldQuat) · (rightHandWorldQuat · LEFT_HAND_MIRROR_OFFSET)`,
+then `updateMatrixWorld`. `LEFT_HAND_MIRROR_OFFSET` (default `[0,0,0]`) is a corrective
+euler, live-tunable via `window.__lgTune.handRot`. Now both palms wrap the handle the
+same way.
+
+**2. Reach: the left arm CLAMPS at max extension in the down-bat pose** → the hand
+floats ~6 cm short (`__leftGripDbg.dist_m ≈ 0.065`, `handGap ≈ 0.18`). Tightening
+`LEFT_GRIP_GAP` alone makes it WORSE (target moves but the hand can't follow). FIX:
+pull the left shoulder IN harder via the clavicle so the reach lands —
+`LEFT_CLAV_LIFT [0,−0.10,0] → [0,−0.38,0]`. That dropped the residual to 0.04 and gave
+the reach headroom, after which `LEFT_GRIP_GAP −0.02` brought the hands together
+(`handGap 0.18 → 0.12`, `leftToGrip 0.11 → 0.06`). Verified: a full delivery runs with
+`rigMax` stable at 2.70 and the weld holding through swing/contact.
+
+**RIG LIMITATION — no finger bones.** The Meshy rig has only single `LeftHand` /
+`RightHand` bones (~24 bones/char, confirmed by scene traversal — NO finger/thumb
+bones). The hand meshes are rigid OPEN palms; fingers cannot curl around the bat. So a
+literal wrapped grip is impossible — the most you can do is ORIENT the palm toward the
+handle (the mirror above) and seat both hands adjacent. Don't chase finger curl; it's
+not in the rig.
+
+**Console knobs:** idle bat hold — `window.__guardLift` (shoulder up/down),
+`window.__guardElbow` (elbow bend), `window.__guardCock` (wrist/blade tilt),
+`window.__guardYaw` (horizontal sweep); grip — `window.__gripGap` (left-hand handle
+spacing, m), `window.__lgTune.off` (top-hand world stretch), `window.__lgTune.clav`
+(left-shoulder pull-in / reach), `window.__lgTune.handRot` (left-hand orientation
+offset euler); `window.__batClear` (body clearance). Bake chosen values into the
+defaults.
+
+---
+
 ## Contact Point Calibration
 
 ### contactPointWorld.y — dynamic, not hardcoded
@@ -254,6 +413,51 @@ Module-level `_predContactTarget` vector in AnimationBrain.ts holds the interpol
 `neckFraction` remains 0 on all calls (Meshy AI neck Y-axis convention issue still applies).
 
 ---
+
+## ⚠ Mesh-collapse over long autoplay — TWO distinct bugs
+
+The batsman mesh collapsing into a blob after ~10–60 autoplay deliveries had **two**
+independent causes. Both are fixed; if it ever returns, the watchdog below names the bone.
+
+**Bug A — `neck` accumulation (the actual collapse).** `neck` was excluded from `ROLE_BONES`
+so it was never reset to bind. But `BattingController` (lines ~482/550/568/585/606) and
+`fxBus` (`addRot('neck', 0.18·d, …)`) write small per-swing deltas to it. With no reset they
+compounded ~0.1–0.3 rad/delivery → drifted past 3.6 rad → rig collapse. **Fix:** added `'neck'`
+to `ROLE_BONES` (AnimationBrain) so it's captured in the bind pose and reset every frame; the
+swing deltas now apply transiently. **Lesson:** any bone receiving `addRot` MUST be in a
+per-frame reset set (`LOCO_BONES`/`ROLE_BONES`/`head`) or it accumulates forever.
+
+**Watchdog:** `AnimationBrain._sanitizeRig()` scans batsman bones each frame, logs
+`[RIG-DIVERGE]` for the first bone past a sane bound (4.5 rad), exposes
+`window.__anim.rigMax()` (poll for the worst bone/magnitude live), and self-heals non-finite /
+>6 rad bones back to bind. This is how Bug A was pinpointed (`rigMax()` → `bone: 'neck'`).
+
+**Bug B — spring integration (separate, also fixed; see below).**
+
+## ⚠ Spring integration MUST be semi-implicit (mesh-collapse bug)
+
+**Symptom:** during long autoplay the whole batsman mesh collapses into a blob after ~10–20
+deliveries; a page refresh fixes it (stateful, not a load bug).
+
+**Root cause:** the contact lock multiplies spring damping up to ×10
+(`springDampingMult = 1 + lockWeight*9` in AnimationBrain). The springs (`springs.ts`,
+`BatContact.ts`) used **explicit Euler**: `vel += (−vel·d)·dt`. With `d = 30×10 = 300` and
+`dt` clamped to `1/30`, that's `vel *= (1 − d·dt) = (1 − 10) = −9` PER FRAME → exponential
+blow-up. The exploded value persists in the spring state (`_stateMap` WeakMap / BatContact
+fields) which is **never reset between deliveries** (only on character bind), so each contact
+kicks it further until the extremity bones (hands/forearms/head) get garbage rotations.
+
+**Fix:** semi-implicit / implicit-damping integration —
+`vel = (vel + stiffness·(target−cur)·dt) / (1 + d·dt)`. Unconditionally stable for any
+damping; high damping now FREEZES (the intended impact-lock behaviour) instead of exploding.
+Plus a self-heal guard: if a follower goes non-finite or > 1.5 rad from the pose, snap it back.
+`BatContact` additionally clamps its step (`min(dt, 1/60)`) against autoplay dt spikes.
+
+**Rule:** never integrate a damped spring with explicit Euler when the damping coefficient can
+be scaled at runtime — `damping·dt` can exceed 2 and the scheme goes unstable. Use the implicit
+form. (Ruled out as NON-causes: FootGroundingIK isn't wired in; BatRig is dead code; per-frame
+LOCO/ROLE/HEAD bind-pose `setRot` and layer-accumulator `begin()` already reset rotations
+correctly; all `addPos` is on `hips`, which `applyBPToLoco` resets.)
 
 ## Secondary Motion & Balance Recovery
 

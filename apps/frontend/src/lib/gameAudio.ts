@@ -493,3 +493,28 @@ export function playTickerUpdate(): void {
   o.start(); o.stop(c.currentTime + 0.05);
 }
 
+/** Two-note bell chime played when a win toast appears. Big wins (≥3×) add a third note. */
+export function playWinTrin(multiplier = 1): void {
+  const c = resume();
+  if (!c) return;
+  const now = c.currentTime;
+  const notes: Array<{ freq: number; delay: number; gain: number }> = [
+    { freq: 1047, delay: 0,    gain: 0.28 },  // C6
+    { freq: 1319, delay: 0.13, gain: 0.20 },  // E6
+  ];
+  if (multiplier >= 3) notes.push({ freq: 1568, delay: 0.26, gain: 0.16 }); // G6
+  for (const n of notes) {
+    const osc = c.createOscillator();
+    const g   = c.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = n.freq;
+    g.gain.setValueAtTime(0, now + n.delay);
+    g.gain.linearRampToValueAtTime(n.gain, now + n.delay + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, now + n.delay + 0.75);
+    osc.connect(g);
+    g.connect(c.destination);
+    osc.start(now + n.delay);
+    osc.stop(now + n.delay + 0.76);
+  }
+}
+

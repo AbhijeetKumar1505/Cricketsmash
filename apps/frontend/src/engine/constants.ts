@@ -22,13 +22,14 @@ export const WORLD = {
   STUMPS_FAR_Z:  -10.5,   // bowling stumps
   PITCH_HALF_W:    0.23,  // half-width of pitch (metres)
   GROUND_Y:        0.0,
+  BOUNDARY_R:     14.0,   // radius of boundary rope circle (matches Stadium.ts)
 } as const;
 
 // ── Ball physics ──────────────────────────────────────────────────────────────
 
 export const BALL = {
   RADIUS:      0.036,  // real cricket ball ~7.2cm diameter
-  GRAVITY:     9.8,    // m/s²
+  GRAVITY:     9.81,   // m/s²
   RESTITUTION: 0.45,   // energy retained on ground bounce
   FRICTION:    0.80,   // speed retained along ground plane
   SPIN_RATE:   18,     // radians/s while in flight

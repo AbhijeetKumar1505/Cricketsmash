@@ -421,21 +421,67 @@ function keeper(): THREE.CanvasTexture {
 // ── Crowd ─────────────────────────────────────────────────────────────────────
 
 const CROWD_COLS = ['#8D6E63','#66BB6A','#FF7043','#42A5F5','#AB47BC','#FFA726','#26A69A','#EC407A','#78909C','#FFCA28'];
+const CROWD_SKIN = ['#FDBCB4','#F1C27D','#E0AC69','#C68642','#8D5524','#FDBCB4','#F1C27D','#C68642','#FDBCB4','#E0AC69'];
 
-function audience(v: number): THREE.CanvasTexture {
-  const [cv, cx] = makeCanvas(48, 48);
-  const col = CROWD_COLS[v % CROWD_COLS.length];
-  const tilt = (v % 5 - 2) * 0.06;
-  const eyeGap = 5 + (v % 4) * 0.75;
-  const mx = 24, my = 28;
-  cx.save();
-  cx.translate(mx, my);
-  cx.rotate(tilt);
-  cx.beginPath(); cx.ellipse(0, 0, 16, 14, 0, 0, Math.PI * 2);
-  fillStroke(cx, col, darken(col, 0.2), 1.1);
-  eye(cx, -eyeGap, -4, 5.6, 0, 0);
-  eye(cx, eyeGap, -4, 5.6, 0, 0);
-  cx.restore();
+function audienceSilhouette(v: number, pose: 'idle' | 'celebrate'): THREE.CanvasTexture {
+  const [cv, cx] = makeCanvas(48, 80);
+  const col  = CROWD_COLS[v % CROWD_COLS.length]!;
+  const skin = CROWD_SKIN[v % CROWD_SKIN.length]!;
+  const dark = darken(col, 0.30);
+  const mid  = 24;
+
+  // Head
+  cx.beginPath();
+  cx.ellipse(mid, 10, 7, 8, 0, 0, Math.PI * 2);
+  fillStroke(cx, skin, darken(skin, 0.18), 1);
+
+  // Neck
+  cx.fillStyle = skin;
+  cx.fillRect(mid - 3, 17, 6, 4);
+
+  // Torso / jersey
+  cx.beginPath();
+  if (cx.roundRect) {
+    cx.roundRect(mid - 9, 21, 18, 20, 2);
+  } else {
+    cx.rect(mid - 9, 21, 18, 20);
+  }
+  fillStroke(cx, col, dark, 1);
+
+  cx.strokeStyle = dark;
+  cx.lineWidth = 3.5;
+  cx.lineCap = 'round';
+
+  if (pose === 'idle') {
+    // Arms — angled outward at rest
+    cx.beginPath(); cx.moveTo(mid - 8, 25); cx.lineTo(mid - 14, 38); cx.stroke();
+    cx.beginPath(); cx.moveTo(mid + 8, 25); cx.lineTo(mid + 14, 38); cx.stroke();
+    // Legs
+    cx.lineWidth = 4;
+    cx.beginPath(); cx.moveTo(mid - 4, 41); cx.lineTo(mid - 6, 64); cx.stroke();
+    cx.beginPath(); cx.moveTo(mid + 4, 41); cx.lineTo(mid + 6, 64); cx.stroke();
+    // Feet
+    cx.lineWidth = 3;
+    cx.beginPath(); cx.moveTo(mid - 6, 64); cx.lineTo(mid - 10, 67); cx.stroke();
+    cx.beginPath(); cx.moveTo(mid + 6, 64); cx.lineTo(mid + 10, 67); cx.stroke();
+  } else {
+    // Arms raised in V-shape (celebrate / jump)
+    cx.beginPath(); cx.moveTo(mid - 8, 25); cx.lineTo(mid - 19,  6); cx.stroke();
+    cx.beginPath(); cx.moveTo(mid + 8, 25); cx.lineTo(mid + 19,  6); cx.stroke();
+    // Fists at tip
+    cx.fillStyle = skin;
+    cx.beginPath(); cx.arc(mid - 19, 5, 3.5, 0, Math.PI * 2); cx.fill();
+    cx.beginPath(); cx.arc(mid + 19, 5, 3.5, 0, Math.PI * 2); cx.fill();
+    // Legs slightly bent (energy)
+    cx.lineWidth = 4;
+    cx.strokeStyle = dark;
+    cx.beginPath(); cx.moveTo(mid - 4, 41); cx.lineTo(mid - 9, 62); cx.stroke();
+    cx.beginPath(); cx.moveTo(mid + 4, 41); cx.lineTo(mid + 9, 62); cx.stroke();
+    // Feet
+    cx.lineWidth = 3;
+    cx.beginPath(); cx.moveTo(mid - 9, 62); cx.lineTo(mid - 13, 65); cx.stroke();
+    cx.beginPath(); cx.moveTo(mid + 9, 62); cx.lineTo(mid + 13, 65); cx.stroke();
+  }
   return toTex(cv);
 }
 
@@ -477,6 +523,7 @@ export class DoodleAssets {
   readonly fielders: THREE.CanvasTexture[];
   readonly keeper: THREE.CanvasTexture;
   readonly audience: THREE.CanvasTexture[];
+  readonly audienceCelebrate: THREE.CanvasTexture[];
   readonly cloud: THREE.CanvasTexture;
   readonly wheat: THREE.CanvasTexture;
   readonly ballGlow: THREE.CanvasTexture;
@@ -490,7 +537,8 @@ export class DoodleAssets {
     this.bowler = { idle: bowler('idle'), run: bowler('run'), bowl: bowler('bowl'), release: bowler('release') };
     this.fielders = [fielderFox(), fielderBear(), fielderHopper(), fielderRabbit()];
     this.keeper = keeper();
-    this.audience = CROWD_COLS.map((_, i) => audience(i));
+    this.audience          = CROWD_COLS.map((_, i) => audienceSilhouette(i, 'idle'));
+    this.audienceCelebrate = CROWD_COLS.map((_, i) => audienceSilhouette(i, 'celebrate'));
     this.cloud = cloud();
     this.wheat = wheat();
     this.ballGlow = ballGlow();
@@ -500,7 +548,7 @@ export class DoodleAssets {
   dispose() {
     const all: THREE.CanvasTexture[] = [
       ...Object.values(this.batsman), ...Object.values(this.bowler),
-      ...this.fielders, this.keeper, ...this.audience, this.cloud, this.wheat,
+      ...this.fielders, this.keeper, ...this.audience, ...this.audienceCelebrate, this.cloud, this.wheat,
       this.ballGlow, this.shadow
     ];
     for (const t of all) t.dispose();

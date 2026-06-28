@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { playBlip } from '../../../lib/gameAudio';
+  import { playBlip, playWinTrin } from '../../../lib/gameAudio';
+  import { fly } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
   import {
     swing,
     game,
@@ -80,28 +82,79 @@
     return 'bet';
   });
 
-  const currSymbol = $derived(
-    game.currency === 'USD' ? '$' :
-    game.currency === 'EUR' ? '€' :
-    game.currency === 'GBP' ? '£' :
-    game.currency === 'INR' ? '₹' :
-    game.currency
-  );
+  const CURRENCY_SYMBOLS: Record<string, string> = {
+    // Fiat
+    USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$', NZD: 'NZ$',
+    JPY: '¥', CNY: '¥', KRW: '₩', HKD: 'HK$', SGD: 'S$',
+    INR: '₹', BRL: 'R$', MXN: '$', ARS: '$', CLP: '$', PEN: 'S/',
+    COP: '$', NOK: 'kr', SEK: 'kr', DKK: 'kr', CHF: 'Fr', PLN: 'zł',
+    CZK: 'Kč', HUF: 'Ft', RON: 'lei', TRY: '₺', AED: 'د.إ',
+    RUB: '₽', IDR: 'Rp', VND: '₫', NGN: '₦', ZAR: 'R',
+    PHP: '₱', THB: '฿', MYR: 'RM',
+    // Crypto
+    BTC: '₿', ETH: 'Ξ', LTC: 'Ł', DOGE: 'Ð', ADA: '₳',
+    XRP: 'XRP', BNB: 'BNB', SOL: 'SOL', TRX: 'TRX', USDT: '$',
+    USDC: '$', AVAX: 'AVAX', MATIC: 'MATIC', LINK: 'LINK', DOT: 'DOT',
+    UNI: 'UNI', APE: 'APE', SHIB: 'SHIB',
+    // Stake social currencies
+    XGC: 'GC', XSC: 'SC',
+  };
+  const CURRENCY_DECIMALS: Record<string, number> = {
+    JPY: 0, KRW: 0, IDR: 0, VND: 0, CLP: 0, HUF: 0,
+    BTC: 8, ETH: 6, LTC: 6, DOGE: 4, ADA: 4,
+    XRP: 4, BNB: 4, SOL: 4, TRX: 4, AVAX: 4, MATIC: 4,
+  };
+
+  const currSymbol   = $derived(CURRENCY_SYMBOLS[game.currency] ?? game.currency);
+  const currDecimals = $derived(CURRENCY_DECIMALS[game.currency] ?? 2);
 
   const btnDisabled = $derived(
     (isLocked || disabled) && actionState !== 'cashout' && game.visualPhase !== 'bowl'
   );
 
+  const bonusBuySurcharge = $derived(game.betAmount * 0.30);
   const canBonusBuy = $derived(
-    !game.betActive && !game.sessionActive && game.balance >= game.betAmount && game.betAmount > 0
+    game.bonusBuyAvailable &&
+    !game.betActive && !game.sessionActive &&
+    game.betAmount >= (game.bonusBuyMinBet ?? 0) &&
+    game.balance >= game.betAmount + bonusBuySurcharge
   );
-  const insuranceCost = $derived(game.betAmount * 10);
+  const insuranceCost = $derived(Math.max(20, game.betAmount * 0.10));
   const canInsurance = $derived(
-    !game.betActive && !game.sessionActive && game.balance >= insuranceCost && game.betAmount > 0
+    !game.betActive && !game.sessionActive &&
+    game.betAmount >= (game.insuranceMinBet ?? 0) &&
+    game.balance >= insuranceCost
   );
 
+  let insAlert = $state<string | null>(null);
+  let insAlertTimer = 0;
+
+  function scheduleBonusAlertClear() {
+    setTimeout(() => { game.bonusBuyAlert = null; }, 2200);
+  }
+
+  function scheduleInsAlertClear() {
+    clearTimeout(insAlertTimer);
+    insAlertTimer = window.setTimeout(() => { insAlert = null; }, 2200);
+  }
+
   function handleBonusBuy() {
-    if (!canBonusBuy) return;
+    if (game.betActive || game.sessionActive) return;
+    if (!game.bonusBuyAvailable) {
+      game.bonusBuyAlert = 'Bonus Buy unavailable';
+      scheduleBonusAlertClear();
+      return;
+    }
+    if (game.betAmount < (game.bonusBuyMinBet ?? 0)) {
+      game.bonusBuyAlert = `Min bet ${currSymbol}${(game.bonusBuyMinBet ?? 0).toFixed(currDecimals)}`;
+      scheduleBonusAlertClear();
+      return;
+    }
+    if (game.balance < game.betAmount + bonusBuySurcharge) {
+      game.bonusBuyAlert = 'Insufficient balance';
+      scheduleBonusAlertClear();
+      return;
+    }
     void placeBonusBuy();
     playBlip(800, 0.1);
   }
@@ -110,13 +163,32 @@
     if (game.insuranceActive) {
       deactivateInsurance();
       playBlip(440, 0.08);
-    } else {
-      if (!canInsurance) return;
-      activateInsurance();
-      playBlip(700, 0.1);
+      return;
     }
+    if (game.betActive || game.sessionActive) return;
+    if (game.betAmount < (game.insuranceMinBet ?? 0)) {
+      insAlert = `Min bet ${currSymbol}${(game.insuranceMinBet ?? 0).toFixed(currDecimals)}`;
+      scheduleInsAlertClear();
+      return;
+    }
+    if (game.balance < insuranceCost) {
+      insAlert = 'Insufficient balance';
+      scheduleInsAlertClear();
+      return;
+    }
+    activateInsurance();
+    playBlip(700, 0.1);
   }
 </script>
+
+{#if game.winToast}
+  <div class="win-toast"
+       transition:fly={{ y: -20, duration: 350, easing: cubicOut }}
+       onintroend={() => playWinTrin(game.winToast?.multiplier ?? 1)}>
+    <span class="win-amt">+{currSymbol}{game.winToast.amount.toFixed(currDecimals)}</span>
+    <span class="win-mult">{game.winToast.multiplier.toFixed(2)}×</span>
+  </div>
+{/if}
 
 <div class="console crystal-panel">
   <div class="console-inner">
@@ -124,7 +196,7 @@
     <!-- ① Balance -->
     <div class="cell cell-balance" aria-label="Balance">
       <span class="cell-label">BALANCE</span>
-      <span class="balance-val">{currSymbol}&nbsp;{game.balance.toFixed(2)}</span>
+      <span class="balance-val">{currSymbol}&nbsp;{game.balance.toFixed(currDecimals)}</span>
     </div>
 
     <!-- ② Bet Amount -->
@@ -182,27 +254,36 @@
     </div>
 
     <!-- ④ Feature Chips — BUY + INS -->
-    <div class="cell cell-chips">
+    <div class="cell cell-chips" style="position:relative;">
+      {#if game.bonusBuyAlert}
+        <div class="bb-alert bb-alert-buy" transition:fly={{ y: -8, duration: 200 }}>
+          {game.bonusBuyAlert}
+        </div>
+      {:else if insAlert}
+        <div class="bb-alert bb-alert-ins" transition:fly={{ y: -8, duration: 200 }}>
+          {insAlert}
+        </div>
+      {/if}
       <button
         class="feat-chip"
         class:is-disabled={!canBonusBuy}
         onclick={handleBonusBuy}
-        disabled={!canBonusBuy}
         aria-label="Bonus Buy"
       >
         <span class="chip-icon">★</span>
         <span class="chip-label">BUY</span>
+        <span class="chip-sub">+{bonusBuySurcharge.toFixed(currDecimals)}</span>
       </button>
       <button
         class="feat-chip"
         class:is-active={game.insuranceActive}
         class:is-disabled={!canInsurance && !game.insuranceActive}
         onclick={handleInsurance}
-        disabled={!canInsurance && !game.insuranceActive}
         aria-label={game.insuranceActive ? 'Deactivate insurance' : 'Activate insurance'}
       >
         <span class="chip-icon">🛡</span>
         <span class="chip-label">INS</span>
+        <span class="chip-sub">{currSymbol}{insuranceCost.toFixed(currDecimals)}</span>
       </button>
     </div>
 
@@ -222,7 +303,7 @@
             <span class="btn-word">CASH</span>
             <span class="btn-word">OUT</span>
             {#if payout > 0}
-              <span class="btn-payout">{currSymbol}{payout.toFixed(2)}</span>
+              <span class="btn-payout">{currSymbol}{payout.toFixed(currDecimals)}</span>
             {/if}
           {:else if btnState === 'hit'}
             <span class="btn-big">HIT</span>
@@ -536,6 +617,59 @@
     text-transform: uppercase;
     line-height: 1;
     color: inherit;
+  }
+
+  .chip-sub {
+    font-size: 0.32rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: rgba(255, 215, 0, 0.65);
+    line-height: 1;
+    white-space: nowrap;
+    max-width: 48px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── Win toast ─────────────────────────────────────────────────────────── */
+  .win-toast {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.82);
+    border: 1px solid #ffd700;
+    border-radius: 24px;
+    padding: 6px 22px;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    pointer-events: none;
+    z-index: 30;
+    white-space: nowrap;
+    margin-bottom: 8px;
+  }
+
+  .win-amt  { color: #00ff88; font-size: 1.35rem; font-weight: 700; letter-spacing: 0.04em; }
+  .win-mult { color: #ffd700; font-size: 0.85rem; opacity: 0.9; }
+
+  /* ── Bonus buy alert pill ──────────────────────────────────────────────── */
+  .bb-alert {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(200, 40, 40, 0.90);
+    border: 1px solid rgba(255, 80, 80, 0.6);
+    border-radius: 12px;
+    padding: 4px 12px;
+    font-size: 0.55rem;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 20;
+    margin-bottom: 4px;
   }
 
   /* ── ⑤ PLACE BET — 120px gold dome ─────────────────────────────────────── */

@@ -29,13 +29,13 @@ import { AnimationSystem,
 import { FeedbackSystem,
          makeFeedbackState }  from './systems/FeedbackSystem.js';
 import { RoundSystem }        from './systems/RoundSystem.js';
-import { TIMING, BALL }       from './constants.js';
+import { TIMING, BALL, WORLD } from './constants.js';
 import { OutcomeSystem }      from './rng/OutcomeSystem.js';
 import type { BallData }      from './systems/BallSystem.js';
 import type { CharacterAnimState } from './systems/AnimationSystem.js';
 import type { FeedbackState } from './systems/FeedbackSystem.js';
 import type { RoundData }     from './systems/RoundSystem.js';
-import type { DeliveryOutcome, ShotResult } from './rng/OutcomeSystem.js';
+import type { DeliveryOutcome, ShotResult, OutcomeBucket } from './rng/OutcomeSystem.js';
 import { GameState } from './state/StateMachine.js';
 import type { ShotType } from '../core/modeEngine.js';
 
@@ -45,7 +45,7 @@ import { HitEngine }       from './physics/hitEngine.js';
 import { BowlerFSM }       from './physics/animationFSM.js';
 import { BatsmanFSM }      from './physics/animationFSM.js';
 import type { BowlerPhase, BatsmanPhase } from './physics/animationFSM.js';
-import { Vec3, mulberry32, makeSeed } from './physics/physics.js';
+import { Vec3, mulberry32, makeSeed, clamp } from './physics/physics.js';
 import { predictContact } from './physics/BallPredictor.js';
 import type { ContactSolution } from './physics/ContactSolution.js';
 import {
@@ -59,7 +59,10 @@ import type { BonusType } from './events/EventBus.js';
 import type { BonusRoamContext, BonusSnapshot } from './bonus/types.js';
 import { BonusSystem } from './systems/BonusSystem.js';
 import { SkyObjectSystem } from './systems/SkyObjectSystem.js';
+import { FlyoverSystem } from './systems/FlyoverSystem.js';
 import type { SkyObjectSnapshot } from './sky/types.js';
+import type { PlayerProfile } from './player/PlayerProfile.js';
+import { DEFAULT_PROFILE } from './player/PlayerProfile.js';
 
 // ── Public snapshot (read-only view consumed by Renderer each frame) ──────────
 
@@ -128,6 +131,8 @@ export interface EngineSnapshot {
   } | null>;
   /** Sky Object Lite (standard mode); null when inactive. */
   readonly skyObject: SkyObjectSnapshot | null;
+  /** Autonomous flyover aircraft per lane (3 lanes); null entries = lane inactive. */
+  readonly flyoverAircrafts: (SkyObjectSnapshot | null)[];
   /** Bowler animation FSM mirror — drives BowlingController in the renderer. */
   readonly bowlerFSM:  BowlerFSMSnapshot;
   /** Batsman animation FSM mirror — drives BattingController in the renderer. */
@@ -202,9 +207,11 @@ export class GameEngine {
   private _fielderTarget: { x: number; z: number } | null = null;
   private readonly _bonusSys = new BonusSystem(BONUS_SKILL_ZONES);
   private readonly _skySys = new SkyObjectSystem();
+  private readonly _flyoverSys = new FlyoverSystem();
   /** Current delivery uses sky bonus trajectory (no stadium bonus collisions). */
   private _skyActive = false;
   private _skyImpactEmitted = false;
+  private _flyoverHitEmitted = false;
   private _activeBonusHit: {
     sourceId: string;
     extraBalls: number;
@@ -217,10 +224,12 @@ export class GameEngine {
   private _contactSolution: ContactSolution | null = null;
 
   // ── Flags ─────────────────────────────────────────────────────────────────
-  private swingPending   = false;
-  private hitResolved    = false;
-  private resultEmitted  = false;
-  private _bonusEligible = false;
+  private swingPending    = false;
+  private hitResolved     = false;
+  private resultEmitted   = false;
+  private _bonusEligible  = false;
+  /** Bucket resolved after swing (used to extend POST_HIT_MAX for sixes). */
+  private _resolvedBucket: OutcomeBucket = 'dot';
 
   // ── Sync event counters (incremented from FSM phase entries) ─────────────
   private _ballReleaseId = 0;
@@ -229,7 +238,7 @@ export class GameEngine {
   private _contactBallY = 0;
   private _contactBallZ = 0;
 
-  constructor(matchSeed?: number) {
+  constructor(matchSeed?: number, private readonly _profile: PlayerProfile = DEFAULT_PROFILE) {
     this._matchSeed  = matchSeed ?? (Date.now() & 0xffffffff);
     this.events      = new EventBus();
     this.sm          = new StateMachine(this.events);
@@ -316,6 +325,7 @@ export class GameEngine {
     };
     this._bonusSys.update(dt, roam, this._rng);
     this._skySys.update(dt);
+    this._flyoverSys.update(dt);
   }
 
   getSnapshot(): EngineSnapshot {
@@ -338,7 +348,8 @@ export class GameEngine {
             worldPos: this._activeBonusHit.worldPos,
           }
         : null,
-      skyObject: this._skySys.snapshot,
+      skyObject:        this._skySys.snapshot,
+      flyoverAircrafts: this._flyoverSys.snapshots,
       bowlerFSM: {
         phase:    bSnap.phase,
         progress: bSnap.progress,
@@ -387,8 +398,9 @@ export class GameEngine {
     this.hitResolved    = false;
     this.resultEmitted  = false;
     this._bonusEligible = false;
-    this._skyImpactEmitted = false;
-    this._contactSolution = null;
+    this._skyImpactEmitted  = false;
+    this._flyoverHitEmitted = false;
+    this._contactSolution   = null;
     this.currentShot    = this.outcomeSys.toShotResult(outcome);
 
     // M6: publish delivery intent on the per-character anim states so the
@@ -467,17 +479,25 @@ export class GameEngine {
       // ── Generate ContactSolution from current ball state ─────────────────
       // Predict when and where the ball will reach the batsman, then convert
       // to FSM-clock-relative timing so the animation system can synchronize.
+      // Sample the deterministic trajectory at the batsman — the REAL contact point
+      // (pre-hit velocities aren't maintained, so projection can't be used).
+      const cpos = this.ballSys.contactSample(this.ball.params!);
       this._contactSolution = predictContact(
         this.ball.params!.hitTime,
         this.ball.elapsed,
         this.batsmanFSM.totalRun,
-        this.ball.y,   // current ball height — used for dynamic contactY projection
-        this.ball.vy,  // current vertical velocity — determines trajectory arc
-        this.ball.x,   // horizontal position → projected contact X
-        this.ball.z,   // depth position → projected contact Z (in front of crease)
-        this.ball.vx,
-        this.ball.vz,
+        cpos.x, cpos.y, cpos.z,
       );
+
+      // ── DIAGNOSTIC: sampled contact point vs the ball's current position ──────
+      const cp = this._contactSolution.contactPointWorld;
+      console.log('[PREDICT]', {
+        hitTime: +this.ball.params!.hitTime.toFixed(3),
+        elapsed: +this.ball.elapsed.toFixed(3),
+        ballNow: [+this.ball.x.toFixed(3), +this.ball.y.toFixed(3), +this.ball.z.toFixed(3)],
+        contactSample: [+cpos.x.toFixed(3), +cpos.y.toFixed(3), +cpos.z.toFixed(3)],
+        contactPoint: [+cp.x.toFixed(3), +cp.y.toFixed(3), +cp.z.toFixed(3)],
+      });
 
       // Trigger batsman FSM swing with the contact solution for time-warped timing
       this.batsmanFSM.triggerSwing(this._contactSolution);
@@ -489,19 +509,36 @@ export class GameEngine {
     const legacy  = this.hitSys.evaluate(this.ball.elapsed, params.hitTime);
     const timingError = this.ball.elapsed - params.hitTime;
 
+    // Scale shot power by player's powerIndex so aggressive characters hit harder.
+    const basePower  = this.currentShot?.power ?? 0.5;
+    const shotPower  = clamp(basePower * this._profile.stats.powerIndex, 0, 1);
+
     // ── New: result-driven hit velocity via HitEngine ──────────────────────
+    // batsmanFSM.onContact can fire early (MAX_SWING=0.45s cap) for slow
+    // deliveries, making timingError >> GOOD_WINDOW → hitEng returns miss
+    // velocity (+Z toward camera) even when the server confirms a hit.
+    // Clamping to ±GOOD_WINDOW guarantees the correct outfield velocity.
+    const effectiveTimingError = params.outcome === 'hit'
+      ? clamp(timingError, -this.hitEng.GOOD_WINDOW, this.hitEng.GOOD_WINDOW)
+      : timingError;
     const hitOut = this.hitEng.resolve({
-      timingError,
-      shotPower:    this.currentShot?.power ?? 0.5,
+      timingError: effectiveTimingError,
+      shotPower,
       targetBucket: params.bucket,
       rng:          this._rng,
+      shotType:     this.batsman.shotType ?? undefined,
     });
 
     if (this._skyActive && this._skySys.snapshot) {
-      hitOut.velocity = this._skySys.computeImpulse(
+      const imp = this._skySys.computeImpulse(
         new Vec3(this.ball.x, this.ball.y, this.ball.z),
         this._skySys.flightTime,
       );
+      if (Number.isFinite(imp.x) && Number.isFinite(imp.y) && Number.isFinite(imp.z)) {
+        hitOut.velocity = imp;
+        // Lock sky object position so the ball actually reaches its visual position.
+        this._skySys.freeze();
+      }
     }
 
     // Server outcome is the single source of truth.
@@ -510,6 +547,7 @@ export class GameEngine {
     const rawQuality     = hitOut.quality !== 'miss' ? legacy : 'miss';
     const quality        = (params.outcome === 'hit' && rawQuality === 'miss') ? 'good' : rawQuality;
     const resolvedBucket = quality === 'miss' ? 'wicket' : params.bucket;
+    this._resolvedBucket = resolvedBucket;
     this._bonusEligible = resolvedBucket !== 'wicket' && !this._skyActive;
 
     // Animate batsman
@@ -588,7 +626,7 @@ export class GameEngine {
     // Safety: if FSM never reaches CONTACT within 400ms (shouldn't happen),
     // force-resolve to prevent an infinite hang in HIT state.
     if (this.swingPending) {
-      if (this.sm.phaseTime > 0.4) this.resolveSwing();
+      if (this.sm.phaseTime > 0.5) this.resolveSwing();
       return;
     }
     // No swing registered — resolve immediately (wicket / no-shot miss).
@@ -634,8 +672,19 @@ export class GameEngine {
     }
 
     this._detectBonusCollision();
+    this._detectFlyoverCollision();
 
-    if (!this.resultEmitted && this.sm.phaseTime >= TIMING.POST_HIT_MAX) {
+    // Stop fours at the boundary rope so the ball visibly comes to rest at the
+    // rope rather than rolling deep into the stands. Sixes fly over (no stop).
+    if (this._resolvedBucket === 'four' && !this.resultEmitted) {
+      const bx = body.position.x, bz = body.position.z;
+      if (bx * bx + bz * bz >= WORLD.BOUNDARY_R * WORLD.BOUNDARY_R) {
+        this.physicsCtrl.stop();
+      }
+    }
+
+    const postHitMax = this._resolvedBucket === 'six' ? 3.2 : TIMING.POST_HIT_MAX;
+    if (!this.resultEmitted && this.sm.phaseTime >= postHitMax) {
       this.resultEmitted = true;
       if (this.round.outcome === 'hit') this.animSys.celebrate(this.batsman);
       this.events.emit('roundEnd', {
@@ -644,6 +693,19 @@ export class GameEngine {
       });
       this.sm.transition(GameState.RESET);
     }
+  }
+
+  private _detectFlyoverCollision(): void {
+    if (this._flyoverHitEmitted) return;
+    if (!this.ball.active) return;
+    const hit = this._flyoverSys.checkCollision(this.ball);
+    if (!hit) return;
+    this._flyoverHitEmitted = true;
+    this.events.emit('skyObjectHit', {
+      type:       hit.type,
+      multiplier: hit.multiplier,
+      worldPos:   hit.worldPos,
+    });
   }
 
   private _detectBonusCollision(): void {
@@ -762,7 +824,8 @@ export class GameEngine {
     this._bonusSys.clear();
     this._activeBonusHit = null;
     this._skySys.dispose();
-    this._skyActive = false;
-    this._skyImpactEmitted = false;
+    this._skyActive         = false;
+    this._skyImpactEmitted  = false;
+    this._flyoverHitEmitted = false;
   }
 }

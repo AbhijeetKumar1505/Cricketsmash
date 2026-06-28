@@ -13,6 +13,7 @@
 
 import { GameEngine }    from '../engine/GameEngine.js';
 import type { DeliveryIntent } from '../engine/GameEngine.js';
+import { getProfile } from '../engine/player/playerRoster.js';
 import { Renderer }      from '../render/Renderer.js';
 import { GameLoop }      from '../engine/loop/GameLoop.js';
 import { OutcomeSystem } from '../engine/rng/OutcomeSystem.js';
@@ -82,7 +83,7 @@ export class EngineBridge {
     height: number,
     options: { debug?: boolean; batsmanAvatarId?: string } = {},
   ) {
-    this.engine   = new GameEngine();
+    this.engine   = new GameEngine(undefined, getProfile(options.batsmanAvatarId ?? 'default'));
     this.renderer = new Renderer(canvas, width, height, options);
     this.outcomes = new OutcomeSystem();
 

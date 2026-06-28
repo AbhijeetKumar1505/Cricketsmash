@@ -16,6 +16,9 @@
 import { Vec3, GRAVITY, clamp } from './physics.js';
 import type { OutcomeBucket } from '../rng/OutcomeSystem.js';
 
+/** Local mirror of modeEngine ShotType — avoids cross-module import. */
+type ShotTypeName = 'pull' | 'cut' | 'loft' | 'drive' | 'quick_single' | 'pushed_two' | 'run_three' | 'defend' | 'miss' | 'bowled';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type HitQuality   = 'perfect' | 'good' | 'miss';
@@ -38,6 +41,8 @@ export interface HitInput {
   targetBucket:  OutcomeBucket;
   /** Seeded RNG — for deterministic lateral spread. */
   rng:           () => number;
+  /** Shot type from the delivery intent — biases the lateral sector. */
+  shotType?:     ShotTypeName;
 }
 
 export interface HitOutput {
@@ -73,9 +78,28 @@ const BUCKET_ANGLE: Record<OutcomeBucket, number> = {
   single: 0.24,   // ~14°
   double: 0.32,   // ~18°
   triple: 0.38,   // ~22°
-  four:   0.28,   // ~16° — driven, medium height
+  four:   0.34,   // ~19° — firmer drive arc
   six:    0.92,   // ~53° — taller arc for skyline / hoarding targets (still result-driven range)
   wicket: 0.08,   // near-flat
+};
+
+/**
+ * Lateral sector bias per shot type (radians).
+ * Shifts the centre of the lateral distribution so the ball goes to the
+ * correct cricket field sector regardless of the RNG spread.
+ *   Negative = leg side (−X),  Positive = off side (+X)
+ */
+const SHOT_BIAS: Partial<Record<ShotTypeName, number>> = {
+  pull:        -0.22,  // hook/pull to square leg (reduced: compressed world keeps ball in frame)
+  cut:         +0.22,  // backward point / cover (reduced from 0.55)
+  loft:         0.00,  // straight, over mid-on or mid-off
+  drive:        0.00,  // straight drive
+  quick_single: 0.00,  // angled — RNG handles the spread
+  pushed_two:   0.00,
+  run_three:    0.00,
+  defend:       0.00,
+  miss:         0.00,
+  bowled:       0.00,
 };
 
 /**
@@ -83,21 +107,17 @@ const BUCKET_ANGLE: Record<OutcomeBucket, number> = {
  * Seeded RNG picks uniformly within ±spread, so the ball can reach
  * different fielder zones each delivery.
  *
- *   dot    ≈ ±14°  — blocked roughly straight
- *   single ≈ ±60°  — any inner fielder (mid-on, point, cover …)
- *   double ≈ ±57°  — through the gap to deep fielders
- *   triple ≈ ±49°  — near deep fielders / boundary edge
- *   four   ≈ ±43°  — driven through the ring to boundary
- *   six    ≈ ±69°  — anywhere over the boundary rope
- *   wicket ≈ ±11°  — deflects near-straight behind batsman
+ * four/six values are tuned so the ball crosses the boundary rope
+ * (radius 14 from origin) within the broadcast camera's 46° FOV.
+ * Wider values cause the ball to exit the frame before reaching the rope.
  */
 const BUCKET_LATERAL: Record<OutcomeBucket, number> = {
   dot:    0.24,
   single: 1.05,
   double: 1.00,
   triple: 0.85,
-  four:   0.75,
-  six:    1.20,
+  four:   0.30,   // ±17° — keeps cut/pull fours visible at the boundary rope
+  six:    0.50,   // ±29° — sixes stay in frame while still covering wide arc
   wicket: 0.20,
 };
 
@@ -168,7 +188,10 @@ export class HitEngine {
 
     // Base range + angle from bucket
     const baseRange  = BUCKET_RANGE[input.targetBucket];
-    const baseAngle  = BUCKET_ANGLE[input.targetBucket];
+    let   baseAngle  = BUCKET_ANGLE[input.targetBucket];
+
+    // Pull shots hit the ball at a higher trajectory (towering hook over square leg)
+    if (input.targetBucket === 'six' && input.shotType === 'pull') baseAngle += 0.15;
 
     // Quality + power modulate range within ±15%
     const qMult      = quality === 'perfect' ? 1.08 : 1.0;
@@ -184,8 +207,8 @@ export class HitEngine {
     const speedH     = v0 * Math.cos(angle);
     const speedV     = v0 * Math.sin(angle);
 
-    // Lateral spread: bucket spread determines which field zone; timing adds minor bias
-    const lateralRad = this._lateralAngle(input.timingError, input.rng, input.targetBucket);
+    // Lateral spread: bucket spread + shot-type sector bias determines field zone
+    const lateralRad = this._lateralAngle(input.timingError, input.rng, input.targetBucket, input.shotType);
 
     const velocity = new Vec3(
       Math.sin(lateralRad) * speedH,
@@ -212,16 +235,18 @@ export class HitEngine {
   }
 
   /**
-   * Lateral angle (radians): seeded direction within the bucket's field zone.
+   * Lateral angle (radians): sector-biased direction within the bucket's field zone.
    *
-   * The main spread comes from BUCKET_LATERAL so every delivery goes to a
-   * different part of the field (fielder positions match the bucket ranges).
-   * Timing error adds a small directional bias (early = off-side, late = leg).
+   * Centre of the distribution is shifted by SHOT_BIAS so a pull goes to leg side,
+   * a cut goes to off side, etc. RNG jitter within BUCKET_LATERAL then spreads the
+   * ball naturally around that sector. Clamp extended to ±130° to allow
+   * proper behind-square shots (pull/sweep) without clipping the distribution.
    */
-  private _lateralAngle(timingError: number, rng: () => number, bucket: OutcomeBucket): number {
-    const spread = BUCKET_LATERAL[bucket];
-    const base   = clamp(timingError * 0.6, -0.20, 0.20);  // timing bias, minor
-    const jitter = (rng() - 0.5) * 2 * spread;              // seeded ±spread
-    return clamp(base + jitter, -Math.PI * 0.5, Math.PI * 0.5);
+  private _lateralAngle(timingError: number, rng: () => number, bucket: OutcomeBucket, shotType?: ShotTypeName): number {
+    const spread    = BUCKET_LATERAL[bucket];
+    const timingBias = clamp(timingError * 0.6, -0.20, 0.20);
+    const sectorBias = shotType ? (SHOT_BIAS[shotType] ?? 0) : 0;
+    const jitter     = (rng() - 0.5) * 2 * spread;
+    return clamp(sectorBias + timingBias + jitter, -Math.PI * 0.72, Math.PI * 0.72);
   }
 }

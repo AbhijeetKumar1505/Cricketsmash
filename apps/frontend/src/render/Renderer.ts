@@ -11,12 +11,14 @@ import {
   BOWLER_RUN_START_Z,
   FIELDER_SLOTS,
   broadcastHierarchyFielderScale,
+  fielderStanceClassForName,
   getDepthScale,
   getFielderDepthScale,
   PITCH_MID_Z,
   sampleFielderIdleLookPoint,
 } from '../engine/worldLayout.js';
 import { preloadCharacter, instantiateCharacter } from '../game/CharacterManager.js';
+import { bonusGLBAssets } from './entities/BonusGLBAssets.js';
 import type { CharacterInstance } from '../game/CharacterManager.js';
 import { AnimationBrain } from '../game/animation/AnimationBrain.js';
 import { batVibrationQuat } from '../game/animation/fxBus.js';
@@ -24,6 +26,7 @@ import { gameBus } from '../game/GameEventBus.js';
 import { animDebug } from '../game/animation/animDebugState.svelte.js';
 import { anim_telemetry } from '../game/animation/animTelemetry.js';
 import { BAT_QUAT_OFFSET, BAT_SWEET_OFFSET, BAT_GRIP_SEAT } from '../characters/human/bat/batGeometry.js';
+import type { PredictDebug } from '../engine/physics/ContactSolution.js';
 import { DoodleAssets } from './doodle/DoodleAssets.js';
 import { Scene } from './Scene.js';
 import { Camera } from './Camera.js';
@@ -134,9 +137,12 @@ export class Renderer implements Renderable {
   private readonly impactJuice = new ImpactJuice();
   private readonly contactSpark = new ContactSpark();
   private readonly bonusMeshes = new Map<string, BonusObject3D>();
+  /** Set to true once bonusGLBAssets.preload() resolves; syncBonusObjects waits for this. */
+  private _bonusGLBsReady = false;
   private _lastBonusHitId: string | null = null;
   private skyMesh: SkyObject3D | null = null;
   private _lastSkyId: string | null = null;
+  private _flyoverMeshes: Map<string, SkyObject3D> = new Map();
   private readonly debugEnabled: boolean;
   private readonly debugRoot: THREE.Group;
   private readonly debugLanding: THREE.Mesh;
@@ -187,7 +193,8 @@ export class Renderer implements Renderable {
   private _impactDump: Record<string, unknown> | null = null;
   // Debug spheres: red=ball, green=contactPointWorld, blue=bat blade sweet spot.
   // Toggle with `window.__anim.contactDebug = false`. Default on.
-  private _contactDbg: { group: THREE.Group; ball: THREE.Mesh; target: THREE.Mesh; sweet: THREE.Mesh } | null = null;
+  private _contactDbg: { group: THREE.Group; ball: THREE.Mesh; target: THREE.Mesh; sweet: THREE.Mesh; contact: THREE.Mesh } | null = null;
+  private _lastPredict: PredictDebug | null = null;
   private _prevBatsmanPhase = '';
 
   private _stadiumAtmoPrev: {
@@ -232,6 +239,15 @@ export class Renderer implements Renderable {
       0.90,  // threshold — only very bright pixels bloom (daylight-safe, preserves faces)
     );
     this.composer.addPass(this.bloomPass);
+
+    // Dev-only handles for inspecting the scene from the console (e.g. moving the
+    // camera onto the batsman for a close-up to check the bat hold, which is far too
+    // small to judge at the gameplay camera). `__renderOnce` forces a composite.
+    if (typeof window !== 'undefined' && (import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
+      (window as { __cam?: unknown }).__cam = this.cam.three;
+      (window as { __scene?: unknown }).__scene = this.scene.three;
+      (window as { __renderOnce?: () => void }).__renderOnce = () => this.composer.render();
+    }
 
     this.stadium = new StadiumEntity(this.assets);
     this.ball = new BallEntity(this.assets);
@@ -363,6 +379,7 @@ export class Renderer implements Renderable {
     this._updateGlbAnims(scaledDt);
     this.syncBonusObjects();
     this.syncSkyObject();
+    this.syncFlyoverAircraft();
     this.syncDebugVisuals(ballPos);
 
     const activeBonusId = this.snapshot.activeBonusHit?.sourceId ?? null;
@@ -500,31 +517,67 @@ export class Renderer implements Renderable {
   private _createCricketBat(): THREE.Group {
     const g = new THREE.Group();
 
-    // Origin = grip mid-point (sits in palm after world-space sync + quat offset).
-    // +Y = toward bat knob, -Y = toward blade toe.
+    // Origin = grip seat (sits in palm, BAT_GRIP_SEAT metres up from wrist).
+    // +Y = bat knob end,  −Y = blade toe.
+    // Local Z = face (+) / back (−).
+    // BAT_SWEET_OFFSET (−0.50) and BAT_GRIP_SEAT (0.085) in batGeometry.ts are
+    // tuned to this geometry — do not change those constants here.
 
-    // Grip tape — rubberised wrap, straddles origin (+0.05 knob side → -0.02 handle side)
-    const gripGeo = new THREE.BoxGeometry(0.030, 0.14, 0.030);
-    const gripMat = new THREE.MeshStandardMaterial({ color: 0x110707, roughness: 0.95, metalness: 0 });
-    const grip    = new THREE.Mesh(gripGeo, gripMat);
-    grip.position.set(0, 0.05, 0);
+    // Materials
+    const gripMat   = new THREE.MeshStandardMaterial({ color: 0x0d0608, roughness: 0.98, metalness: 0.00 });
+    const willowMat = new THREE.MeshStandardMaterial({ color: 0xf5d98a, roughness: 0.50, metalness: 0.03 });
+    const spineMat  = new THREE.MeshStandardMaterial({ color: 0xe4c055, roughness: 0.64, metalness: 0.02 });
+    const edgeMat   = new THREE.MeshStandardMaterial({ color: 0xdcb848, roughness: 0.62, metalness: 0.04 });
+
+    // ── Knob — rounded stop that prevents the bat slipping ───────────────────
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 6), gripMat);
+    knob.position.set(0, 0.13, 0);
+    g.add(knob);
+
+    // ── Grip tape — cylindrical rubberised wrap (y=-0.055 → y=+0.105) ────────
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.015, 0.16, 8), gripMat);
+    grip.position.set(0, 0.025, 0);
     g.add(grip);
 
-    // Handle — narrow willow section between grip and blade shoulder
-    const hGeo  = new THREE.BoxGeometry(0.026, 0.22, 0.026);
-    const hMat  = new THREE.MeshStandardMaterial({ color: 0xd4a050, roughness: 0.82, metalness: 0.02 });
-    const hMesh = new THREE.Mesh(hGeo, hMat);
-    hMesh.position.set(0, -0.12, 0);
-    g.add(hMesh);
+    // ── Handle — narrow willow cane (y=-0.23 → y=-0.05) ─────────────────────
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.015, 0.18, 8), willowMat);
+    handle.position.set(0, -0.14, 0);
+    g.add(handle);
 
-    // Blade — wider, brighter for silhouette readability at gameplay distance.
-    // Light willow colour + reduced roughness gives specular catch under stadium
-    // lights, making the bat pop against the pitch background.
-    const bGeo  = new THREE.BoxGeometry(0.115, 0.52, 0.044);
-    const bMat  = new THREE.MeshStandardMaterial({ color: 0xf5d98a, roughness: 0.55, metalness: 0.03 });
-    const blade = new THREE.Mesh(bGeo, bMat);
-    blade.position.set(0, -0.50, 0);
-    g.add(blade);
+    // ── Shoulder swell — tapers from handle (narrow) to blade (wide) ─────────
+    // radiusTop (y=-0.23, handle side) = 0.013; radiusBottom (y=-0.31, blade side) = 0.048
+    const shoulder = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.048, 0.08, 10), willowMat);
+    shoulder.position.set(0, -0.27, 0);
+    g.add(shoulder);
+
+    // ── Blade — three-layer construction (face / spine / side edges) ─────────
+    // Blade body spans y=-0.31 (shoulder join) to y=-0.77 (toe).
+    // Centre y=-0.54, height 0.46.  BAT_SWEET_OFFSET=-0.50 sits in the upper blade.
+    const bladeH = 0.46;
+    const bladeY = -0.54;
+
+    // Face — bright light-willow front face; slightly raised toward viewer (+z)
+    const bladeFace = new THREE.Mesh(new THREE.BoxGeometry(0.110, bladeH, 0.016), willowMat);
+    bladeFace.position.set(0, bladeY, 0.014);
+    g.add(bladeFace);
+
+    // Spine ridge — narrower raised rib on the back; slightly darker amber
+    const spine = new THREE.Mesh(new THREE.BoxGeometry(0.044, bladeH - 0.02, 0.030), spineMat);
+    spine.position.set(0, bladeY, -0.015);
+    g.add(spine);
+
+    // Side edges — visible blade thickness; amber to catch stadium rim light
+    const lEdge = new THREE.Mesh(new THREE.BoxGeometry(0.012, bladeH, 0.042), edgeMat);
+    const rEdge = new THREE.Mesh(new THREE.BoxGeometry(0.012, bladeH, 0.042), edgeMat);
+    lEdge.position.set(-0.055, bladeY, -0.003);
+    rEdge.position.set( 0.055, bladeY, -0.003);
+    g.add(lEdge);
+    g.add(rEdge);
+
+    // ── Toe cap — rounded base of the blade ──────────────────────────────────
+    const toe = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), willowMat);
+    toe.position.set(0, -0.77, -0.003);
+    g.add(toe);
 
     return g;
   }
@@ -578,6 +631,11 @@ export class Renderer implements Renderable {
         BAT_GRIP_SEAT,
       );
 
+    // NB: body clearance is applied by moving the right HAND (BatTargetIK
+    // .solveRightGripPost), not by offsetting the bat here — the bat is rigidly
+    // parented to the hand, so it follows automatically and both hands stay on the
+    // handle. Offsetting the mesh directly would detach the bottom hand.
+
     // FX bus contributes a short bat-vibration ring after contact (L7)
     const fx = this._animBrain.getBatsmanFx();
     if (fx.batVibration !== 0) {
@@ -626,6 +684,7 @@ export class Renderer implements Renderable {
           liveBall:     [_round3(live.x), _round3(live.y), _round3(live.z)],  // post-relaunch (departing)
           contactPoint: cp ? [_round3(cp.x), _round3(cp.y), _round3(cp.z)] : null,
           grip:         [_round3(grip.x), _round3(grip.y), _round3(grip.z)],
+          sweet:        [_round3(_sweetSpot.x), _round3(_sweetSpot.y), _round3(_sweetSpot.z)], // blade @ contact frame
           axisT_m:      _round3(axisT),
           perpDist_m:   _round3(perp),
           sweetToBall_m: _round3(_sweetSpot.distanceTo(_ballPos)),  // blade → true contact pos (overall)
@@ -773,12 +832,13 @@ export class Renderer implements Renderable {
         return m;
       };
       const group  = new THREE.Group();
-      const ball   = mk(0xff2222);
-      const target = mk(0x22ff22);
-      const sweet  = mk(0x2266ff);
-      group.add(ball, target, sweet);
+      const ball   = mk(0xff2222);  // red    — live ball (departs after contact)
+      const target = mk(0x22ff22);  // green  — planner target (contactPointWorld)
+      const sweet  = mk(0x2266ff);  // blue   — bat blade sweet spot (tracks the bat)
+      const contact = mk(0xffff00); // yellow — latched TRUE contact position (persists)
+      group.add(ball, target, sweet, contact);
       this.scene.three.add(group);
-      this._contactDbg = { group, ball, target, sweet };
+      this._contactDbg = { group, ball, target, sweet, contact };
     }
 
     const dbg = this._contactDbg;
@@ -790,7 +850,8 @@ export class Renderer implements Renderable {
     dbg.ball.visible = b.active;
 
     _batUp.set(0, 1, 0).applyQuaternion(this._batsmanBat.quaternion).normalize();
-    dbg.sweet.position.copy(this._batsmanBat.position).addScaledVector(_batUp, BAT_SWEET_OFFSET);
+    const grip = this._batsmanBat.position;
+    dbg.sweet.position.copy(grip).addScaledVector(_batUp, BAT_SWEET_OFFSET);
 
     const cs = this.snapshot.contactSolution;
     if (cs) {
@@ -799,6 +860,48 @@ export class Renderer implements Renderable {
     } else {
       dbg.target.visible = false;
     }
+
+    // Yellow: the latched TRUE contact position (persists after contact so the
+    // blue-vs-yellow gap = the real bat-to-ball miss is visible at rest).
+    const sie = this.snapshot.syncEvents;
+    dbg.contact.position.set(sie.contactBallX, sie.contactBallY, sie.contactBallZ);
+    dbg.contact.visible = sie.ballContactId > 0;
+
+    // dumpBat(): proves the bat sweet spot is a real 0.50m off the grip (not "≈ grip").
+    if (typeof window !== 'undefined') {
+      (window as any).__anim ??= {};
+      const gripA  = [_round3(grip.x), _round3(grip.y), _round3(grip.z)];
+      const sweetA = [_round3(dbg.sweet.position.x), _round3(dbg.sweet.position.y), _round3(dbg.sweet.position.z)];
+      const g2s    = _round3(grip.distanceTo(dbg.sweet.position));
+      const inst = this._batsmanInst;
+      (window as any).__anim.dumpBat = () => {
+        const lh = inst?.bones.get('leftHand');
+        const rh2 = inst?.bones.get('rightHand');
+        const la = inst?.bones.get('leftArm');
+        const lfa = inst?.bones.get('leftForeArm');
+        const lp = new THREE.Vector3(), rp = new THREE.Vector3();
+        if (lh) lh.getWorldPosition(lp);
+        if (rh2) rh2.getWorldPosition(rp);
+        const lap = la ? [_round3(la.rotation.x), _round3(la.rotation.y), _round3(la.rotation.z)] : null;
+        const lfar = lfa ? [_round3(lfa.rotation.x), _round3(lfa.rotation.y), _round3(lfa.rotation.z)] : null;
+        const lhInChain = lh && la && lh.parent === lfa && lfa.parent === la;
+        return {
+          leftArmRot: lap, leftForeArmRot: lfar, lhChainOk: lhInChain,
+          grip: gripA, sweet: sweetA, gripToSweet_m: g2s,
+          batUp: [_round3(_batUp.x), _round3(_batUp.y), _round3(_batUp.z)],
+          leftHand: lh ? [_round3(lp.x), _round3(lp.y), _round3(lp.z)] : null,
+          rightHand: rh2 ? [_round3(rp.x), _round3(rp.y), _round3(rp.z)] : null,
+          leftHandToGrip_m: lh ? _round3(lp.distanceTo(grip)) : null,
+          handGap_m: lh && rh2 ? _round3(lp.distanceTo(rp)) : null,
+        };
+      };
+      // dumpPredict(): the exact inputs BallPredictor used for the last delivery.
+      // Cache it — contactSolution is cleared between overs, so reading it live
+      // returns null; the cache persists so the call always has data.
+      const predictDbg = this.snapshot?.contactSolution?.debug;
+      if (predictDbg) this._lastPredict = predictDbg;
+      (window as any).__anim.dumpPredict = () => this._lastPredict ?? null;
+    }
   }
 
   /**
@@ -806,6 +909,10 @@ export class Renderer implements Renderable {
    * This is the sole rendering path — no procedural fallback meshes.
    */
   private async _initGlbOverlays(batsmanAvatarId?: string): Promise<void> {
+    await bonusGLBAssets.preload();
+    // GLBs are now cached — allow syncBonusObjects to create meshes with GLB models.
+    this._bonusGLBsReady = true;
+
     type PlayerId = Parameters<typeof instantiateCharacter>[0];
 
     const fitAndAttach = async (
@@ -899,11 +1006,12 @@ export class Renderer implements Renderable {
       this._fielderInsts[i] = fields[i]?.inst ?? null;
       const inst = fields[i]?.inst;
       if (inst) {
+        const slotName = this._fielderMounts[i]?.slot.name ?? '';
         this._animBrain.setFielder(i, {
           instance: inst,
           root:     this._fielderMounts[i].mount.root,
           playerId: 'ronaldo',
-        });
+        }, fielderStanceClassForName(slotName));
       }
     }
 
@@ -953,11 +1061,12 @@ export class Renderer implements Renderable {
         const result = await fitAndAttach(mount, newId);
         this._fielderInsts[i] = result?.inst ?? null;
         if (result?.inst) {
+          const slotName = this._fielderMounts[i]?.slot.name ?? '';
           this._animBrain.setFielder(i, {
             instance: result.inst,
             root:     mount.root,
             playerId: newId,
-          });
+          }, fielderStanceClassForName(slotName));
         }
       }
     });
@@ -1034,6 +1143,11 @@ export class Renderer implements Renderable {
       this.skyMesh = null;
       this._lastSkyId = null;
     }
+    for (const mesh of this._flyoverMeshes.values()) {
+      this.scene.three.remove(mesh.root);
+      mesh.dispose();
+    }
+    this._flyoverMeshes.clear();
     this.debugLanding.geometry.dispose();
     (this.debugLanding.material as THREE.Material).dispose();
     this.debugSkyTarget.geometry.dispose();
@@ -1065,7 +1179,35 @@ export class Renderer implements Renderable {
     }
   }
 
+  private syncFlyoverAircraft(): void {
+    if (!this.snapshot) return;
+    const activeIds = new Set<string>();
+
+    for (const s of this.snapshot.flyoverAircrafts) {
+      if (!s) continue;
+      activeIds.add(s.id);
+      let mesh = this._flyoverMeshes.get(s.id);
+      if (!mesh) {
+        mesh = new SkyObject3D(s);
+        this._flyoverMeshes.set(s.id, mesh);
+        this.scene.add(mesh.root);
+      }
+      mesh.update(s, this._time);
+      mesh.root.rotation.y = (s.headingY ?? 0) + Math.sin(this._time * 0.7) * 0.02;
+    }
+
+    // Remove meshes whose lane is no longer active
+    for (const [id, mesh] of this._flyoverMeshes.entries()) {
+      if (!activeIds.has(id)) {
+        this.scene.three.remove(mesh.root);
+        mesh.dispose();
+        this._flyoverMeshes.delete(id);
+      }
+    }
+  }
+
   private syncBonusObjects(): void {
+    if (!this._bonusGLBsReady) return;
     if (!this.snapshot) return;
     const nextIds = new Set(this.snapshot.bonusObjects.map((b) => b.id));
     for (const bonus of this.snapshot.bonusObjects) {

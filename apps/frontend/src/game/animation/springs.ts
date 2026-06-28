@@ -41,10 +41,17 @@ const _stateMap = new WeakMap<CharacterInstance, Map<string, SpringState>>();
 
 function stepSpring(s: SpringState, params: SpringParams, dt: number, dampingMult = 1): void {
   const d = params.damping * dampingMult;
-  const ax = (s.prevX - s.curX) * params.stiffness - s.velX * d;
-  const ay = (s.prevY - s.curY) * params.stiffness - s.velY * d;
-  const az = (s.prevZ - s.curZ) * params.stiffness - s.velZ * d;
-  s.velX += ax * dt; s.velY += ay * dt; s.velZ += az * dt;
+  const k = params.stiffness;
+  // Semi-implicit (implicit-damping) integration — UNCONDITIONALLY STABLE even when
+  // d·dt ≫ 2 (the contact lock pushes dampingMult to 10×, giving d·dt ≈ 10).
+  // Explicit Euler here multiplied velocity by (1 − d·dt) ≈ −9 per frame → exponential
+  // blow-up that persisted in the spring state and collapsed the mesh over many
+  // deliveries. The implicit form divides by (1 + d·dt), so high damping FREEZES
+  // motion (the intended behaviour) instead of exploding.
+  const denom = 1 + d * dt;
+  s.velX = (s.velX + (s.prevX - s.curX) * k * dt) / denom;
+  s.velY = (s.velY + (s.prevY - s.curY) * k * dt) / denom;
+  s.velZ = (s.velZ + (s.prevZ - s.curZ) * k * dt) / denom;
   s.curX += s.velX * dt; s.curY += s.velY * dt; s.curZ += s.velZ * dt;
 }
 
@@ -88,6 +95,18 @@ export function applySprings(char: CharacterInstance, dt: number, acc: BoneAccum
       damping:   params.damping,
     };
     stepSpring(s, scaledParams, Math.min(dt, 1 / 30), dampingMult);
+
+    // Self-heal: if the follower ever goes non-finite or implausibly far from the
+    // pose, snap it back. One bad frame can't then permanently corrupt the rig
+    // (the lag is secondary motion — it should never exceed a fraction of a radian).
+    const MAX_LAG = 1.5; // radians
+    if (!Number.isFinite(s.curX) || !Number.isFinite(s.curY) || !Number.isFinite(s.curZ) ||
+        Math.abs(s.curX - bone.rotation.x) > MAX_LAG ||
+        Math.abs(s.curY - bone.rotation.y) > MAX_LAG ||
+        Math.abs(s.curZ - bone.rotation.z) > MAX_LAG) {
+      s.curX = bone.rotation.x; s.curY = bone.rotation.y; s.curZ = bone.rotation.z;
+      s.velX = 0; s.velY = 0; s.velZ = 0;
+    }
 
     const dx = s.curX - bone.rotation.x;
     const dy = s.curY - bone.rotation.y;

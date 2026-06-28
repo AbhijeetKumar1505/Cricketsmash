@@ -32,6 +32,8 @@
       profit: number;
       wasWicket: boolean;
     },
+    /** Whether this result is a special event (boundary, wicket, sky hit). Non-special → compact badge. */
+    isSpecialResult = true,
     /** Shorter hold for autobet (ms) before showing multiplier stage. */
     resultStage1HoldMs = 1400,
     children,
@@ -53,6 +55,7 @@
       profit: number;
       wasWicket: boolean;
     };
+    isSpecialResult?: boolean;
     resultStage1HoldMs?: number;
     children: Snippet;
   } = $props();
@@ -323,20 +326,26 @@
         </div>
       {:else if arenaStatus === "result" && resultStage === 1}
         {#key commentaryKey}
-          <div class="broadcast-card bc-stage bc-stage-enter">
-            <div class="bc-ball-label">
-              RESULT
+          {#if isSpecialResult}
+            <div class="broadcast-card bc-stage bc-stage-enter">
+              <div class="bc-ball-label">
+                RESULT
+              </div>
+              <div
+                class="bc-outcome"
+                style="color: {resultColor}; border-color: rgba({resultColorRgb},0.3); text-shadow: 0 0 30px rgba({resultColorRgb},0.8), 0 0 60px rgba({resultColorRgb},0.3);"
+              >
+                {commentaryText}
+              </div>
+              {#if streak >= 2}
+                <div class="bc-streak">🔥 {streak} IN A ROW</div>
+              {/if}
             </div>
-            <div
-              class="bc-outcome"
-              style="color: {resultColor}; border-color: rgba({resultColorRgb},0.3); text-shadow: 0 0 30px rgba({resultColorRgb},0.8), 0 0 60px rgba({resultColorRgb},0.3);"
-            >
+          {:else if commentaryText}
+            <div class="payout-badge">
               {commentaryText}
             </div>
-            {#if streak >= 2}
-              <div class="bc-streak">🔥 {streak} IN A ROW</div>
-            {/if}
-          </div>
+          {/if}
         {/key}
       {/if}
     </div>
@@ -662,6 +671,31 @@
     z-index: 60;
     pointer-events: none;
     white-space: nowrap;
+  }
+
+  .payout-badge {
+    position: absolute;
+    top: 42%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 12px;
+    padding: 6px 20px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    letter-spacing: 0.06em;
+    animation: payout-fade 1.3s ease forwards;
+    pointer-events: none;
+    z-index: 60;
+    white-space: nowrap;
+  }
+
+  @keyframes payout-fade {
+    0%   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    65%  { opacity: 1; }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-16px); }
   }
 
   .bonus-toast {

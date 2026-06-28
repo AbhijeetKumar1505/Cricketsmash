@@ -5,8 +5,16 @@
     game,
     setAutoPlay,
     setAutoPlayConfig,
+    setAutobetSpeed,
   } from '../../../core/gameController.svelte.js';
   import { playBlip } from '../../../lib/gameAudio.js';
+
+  const SPEEDS = [
+    { level: 0 as const, label: 'SLOW',   icon: '🐢' },
+    { level: 1 as const, label: 'NORMAL', icon: '▶' },
+    { level: 2 as const, label: 'FAST',   icon: '▶▶' },
+    { level: 3 as const, label: 'TURBO',  icon: '⚡' },
+  ];
 
   const ROUNDS = [10, 25, 50, 100, 500, null] as const;             // null = ∞
   const LOSS_MULTS = [5, 10, 20, null] as const;                     // null = no limit
@@ -140,6 +148,23 @@
       </div>
     </section>
 
+    <!-- Speed -->
+    <section class="ab-section">
+      <span class="ab-label">SPEED</span>
+      <div class="chip-row speed-row">
+        {#each SPEEDS as s}
+          <button
+            class="ab-chip speed-chip"
+            class:is-on={game.autobetSpeed === s.level}
+            onclick={() => { setAutobetSpeed(s.level); playBlip(540, 0.04); }}
+          >
+            <span class="speed-icon">{s.icon}</span>
+            <span class="speed-label">{s.label}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+
     <!-- Actions -->
     <div class="ab-actions">
       {#if game.autoPlayOn}
@@ -168,6 +193,8 @@
   .ab-sheet {
     width: 100%;
     max-width: 460px;
+    max-height: calc(100dvh - 150px);
+    overflow-y: auto;
     border-radius: 18px;
     padding: 18px 20px 16px;
     display: flex;
@@ -264,6 +291,29 @@
     box-shadow:
       inset 0 1px 0 rgba(255, 217, 90, 0.25),
       0 0 14px rgba(255, 184, 0, 0.22);
+  }
+
+  .speed-row { grid-template-columns: repeat(4, 1fr); }
+  .speed-chip { min-height: 52px; gap: 4px; padding: 10px 6px; }
+  .speed-icon { font-size: 1.25rem; line-height: 1; }
+  .speed-label {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.68rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    color: inherit;
+    line-height: 1;
+  }
+
+  .ab-chip.is-on.speed-chip {
+    border-color: #00d4ff;
+    color: #00d4ff;
+    background: linear-gradient(180deg,
+      rgba(0, 212, 255, 0.18) 0%,
+      rgba(0, 212, 255, 0.05) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(0, 212, 255, 0.25),
+      0 0 14px rgba(0, 212, 255, 0.28);
   }
 
   .chip-main { line-height: 1; }

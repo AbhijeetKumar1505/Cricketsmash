@@ -1,6 +1,8 @@
 <script lang="ts">
   import {
     STANDARD_PROFILE,
+    BONUS_BUY_PROFILE,
+    STREAK_OVERRIDE_MULTIPLIERS,
     computeRtp,
     CAP_OVER_TOTAL_MULTIPLIER,
     CAP_SINGLE_BALL_MULTIPLIER,
@@ -9,108 +11,38 @@
   let {
     open = false,
     onClose = () => {},
-    locale = 'en',
+    locale: _locale = 'en',
   } = $props<{
     open?: boolean;
     onClose?: () => void;
     locale?: string;
   }>();
 
-  const rtp = (computeRtp(STANDARD_PROFILE.outcomes) * 100).toFixed(2);
-  const maxWin = `${CAP_OVER_TOTAL_MULTIPLIER}x`;
-  const maxSingle = `${CAP_SINGLE_BALL_MULTIPLIER}x`;
+  const rtpStd  = (computeRtp(STANDARD_PROFILE.outcomes) * 100).toFixed(2);
+  const rtpBonus = (computeRtp(BONUS_BUY_PROFILE.outcomes) * 100).toFixed(2);
 
-  // Localized paytable labels
-  const labels: Record<string, Record<string, string>> = {
-    en: {
-      title: 'Game Information',
-      rules: 'How to Play',
-      paytable: 'Paytable',
-      stats: 'Statistics',
-      legal: 'Legal',
-      rtp: 'Return to Player (RTP)',
-      maxWin: 'Maximum Win',
-      maxSingle: 'Max Single Ball',
-      close: 'Close',
-      six: 'Six (6 Runs)',
-      four: 'Four (4 Runs)',
-      triple: 'Triple (3 Runs)',
-      double: 'Double (2 Runs)',
-      single: 'Single (1 Run)',
-      dot: 'Dot Ball',
-      good_fielding: 'Good Fielding',
-      catch_out: 'Catch Out (Wicket)',
-    },
-    es: {
-      title: 'Información del Juego',
-      rules: 'Cómo Jugar',
-      paytable: 'Tabla de Pagos',
-      stats: 'Estadísticas',
-      legal: 'Legal',
-      rtp: 'Retorno al Jugador (RTP)',
-      maxWin: 'Ganancia Máxima',
-      maxSingle: 'Máximo por Bola',
-      close: 'Cerrar',
-      six: 'Seis (6 Carreras)',
-      four: 'Cuatro (4 Carreras)',
-      triple: 'Triple (3 Carreras)',
-      double: 'Doble (2 Carreras)',
-      single: 'Simple (1 Carrera)',
-      dot: 'Dot Ball',
-      good_fielding: 'Buena Defensa',
-      catch_out: 'Atrapada (Wicket)',
-    },
-    pt: {
-      title: 'Informações do Jogo',
-      rules: 'Como Jogar',
-      paytable: 'Tabela de Pagamentos',
-      stats: 'Estatísticas',
-      legal: 'Legal',
-      rtp: 'Retorno ao Jogador (RTP)',
-      maxWin: 'Ganho Máximo',
-      maxSingle: 'Máximo por Bola',
-      close: 'Fechar',
-      six: 'Seis (6 Corridas)',
-      four: 'Quatro (4 Corridas)',
-      triple: 'Triplo (3 Corridas)',
-      double: 'Duplo (2 Corridas)',
-      single: 'Simples (1 Corrida)',
-      dot: 'Dot Ball',
-      good_fielding: 'Boa Defesa',
-      catch_out: 'Eliminação (Wicket)',
-    },
-    hi: {
-      title: 'खेल की जानकारी',
-      rules: 'कैसे खेलें',
-      paytable: 'भुगतान तालिका',
-      stats: 'आँकड़े',
-      legal: 'कानूनी',
-      rtp: 'खिलाड़ी को रिटर्न (RTP)',
-      maxWin: 'अधिकतम जीत',
-      maxSingle: 'प्रति गेंद अधिकतम',
-      close: 'बंद करें',
-      six: 'छक्का (6 रन)',
-      four: 'चौका (4 रन)',
-      triple: 'तिहरा (3 रन)',
-      double: 'दोहरा (2 रन)',
-      single: 'एकल (1 रन)',
-      dot: 'डॉट बॉल',
-      good_fielding: 'अच्छी फील्डिंग',
-      catch_out: 'कैच आउट (विकेट)',
-    },
+  let activeTab   = $state<'rules' | 'paytable' | 'features' | 'legal'>('rules');
+  let paytableMode = $state<'standard' | 'bonus'>('standard');
+
+  const profile = $derived(paytableMode === 'bonus' ? BONUS_BUY_PROFILE : STANDARD_PROFILE);
+
+  const OUTCOME_META: Record<string, { icon: string; label: string; color: string }> = {
+    six:          { icon: '🏏', label: 'SIX',          color: '#00ff88' },
+    four:         { icon: '🏏', label: 'FOUR',         color: '#4ade80' },
+    triple:       { icon: '🏃', label: '3 RUNS',       color: '#fbbf24' },
+    double:       { icon: '🏃', label: '2 RUNS',       color: '#f59e0b' },
+    single:       { icon: '🏃', label: '1 RUN',        color: '#d97706' },
+    dot:          { icon: '⚫', label: 'DOT BALL',     color: 'rgba(255,255,255,0.4)' },
+    good_fielding:{ icon: '🧤', label: 'FIELDED',      color: 'rgba(255,255,255,0.3)' },
+    catch_out:    { icon: '❌', label: 'WICKET',       color: '#ff4455' },
   };
 
-  const t = $derived(labels[locale] ?? labels['en']!);
-
-  // Tab state
-  let activeTab = $state<'rules' | 'paytable' | 'stats' | 'legal'>('rules');
+  const streakEntries = Object.entries(STREAK_OVERRIDE_MULTIPLIERS)
+    .map(([k, v]) => ({ streak: Number(k), mult: v }));
 
   function handleBackdropClick(e: MouseEvent) {
-    if ((e.target as HTMLElement).classList.contains('gi-backdrop')) {
-      onClose();
-    }
+    if ((e.target as HTMLElement).classList.contains('gi-backdrop')) onClose();
   }
-
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') onClose();
   }
@@ -125,170 +57,392 @@
     onkeydown={handleKeydown}
     role="dialog"
     aria-modal="true"
-    aria-label={t.title}
+    aria-label="Game Information"
     tabindex="-1"
   >
     <div class="gi-panel">
-      <!-- Header -->
+
+      <!-- ── Header ── -->
       <div class="gi-header">
-        <h2 class="gi-title">{t.title}</h2>
-        <button
-          type="button"
-          class="gi-close"
-          aria-label={t.close}
-          onclick={onClose}
-        >✕</button>
+        <div class="gi-header-left">
+          <span class="gi-logo">🏏</span>
+          <div>
+            <div class="gi-title">Cricket Crash</div>
+            <div class="gi-subtitle">Game Information</div>
+          </div>
+        </div>
+        <button type="button" class="gi-close" aria-label="Close" onclick={onClose}>✕</button>
       </div>
 
-      <!-- Tabs -->
-      <nav class="gi-tabs" aria-label="Info sections">
-        <button
-          type="button"
-          class="gi-tab"
-          class:gi-tab--active={activeTab === 'rules'}
-          onclick={() => activeTab = 'rules'}
-        >{t.rules}</button>
-        <button
-          type="button"
-          class="gi-tab"
-          class:gi-tab--active={activeTab === 'paytable'}
-          onclick={() => activeTab = 'paytable'}
-        >{t.paytable}</button>
-        <button
-          type="button"
-          class="gi-tab"
-          class:gi-tab--active={activeTab === 'stats'}
-          onclick={() => activeTab = 'stats'}
-        >{t.stats}</button>
-        <button
-          type="button"
-          class="gi-tab"
-          class:gi-tab--active={activeTab === 'legal'}
-          onclick={() => activeTab = 'legal'}
-        >{t.legal}</button>
+      <!-- ── Tabs ── -->
+      <nav class="gi-tabs" aria-label="Sections">
+        {#each (['rules', 'paytable', 'features', 'legal'] as const) as tab}
+          <button
+            type="button"
+            class="gi-tab"
+            class:active={activeTab === tab}
+            onclick={() => activeTab = tab}
+          >
+            {#if tab === 'rules'}📖 HOW TO PLAY
+            {:else if tab === 'paytable'}📊 PAYTABLE
+            {:else if tab === 'features'}⚡ FEATURES
+            {:else}📋 LEGAL{/if}
+          </button>
+        {/each}
       </nav>
 
-      <!-- Content -->
+      <!-- ── Body ── -->
       <div class="gi-body">
+
+        <!-- ── HOW TO PLAY ── -->
         {#if activeTab === 'rules'}
-          <div class="gi-section">
-            <h3 class="gi-sh">🏏 Cricket Crash</h3>
-            <ul class="gi-list">
-              <li>Place your bet and watch the bowler deliver.</li>
-              <li>Each delivery results in runs (multiplier increase) or a <strong>wicket</strong> (you lose).</li>
-              <li>A standard over consists of <strong>6 deliveries</strong>.</li>
-              <li>Your multiplier accumulates across all deliveries in the over.</li>
-              <li>You can <strong>Cash Out</strong> at any point during the over to lock in your winnings.</li>
-              <li>If you're <strong>bowled out</strong> (wicket), you lose your bet.</li>
-              <li><strong>Sky bonuses</strong> (Jetpack, Planes) can award <strong>10x–100x</strong> multiplier boosts.</li>
-              <li><strong>Boundary streaks</strong> (consecutive 4s/6s) unlock escalating multipliers up to <strong>8x</strong>.</li>
-            </ul>
+          <div class="gi-content" aria-live="polite">
+
+            <div class="gi-intro-card">
+              <p>A 6-delivery cricket crash game. Build your multiplier ball by ball — but get bowled out and you lose everything. Cash out before the wicket falls.</p>
+            </div>
+
+            <div class="step-label">THE OVER</div>
+            <div class="steps">
+              <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-body">
+                  <div class="step-title">Place Your Bet</div>
+                  <div class="step-desc">Set your stake amount. Optionally activate <strong>Insurance</strong> or purchase a <strong>Bonus Buy</strong> before the over begins.</div>
+                </div>
+              </div>
+              <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-body">
+                  <div class="step-title">Watch Each Delivery</div>
+                  <div class="step-desc">The bowler delivers. Each ball can score runs (multiplying your bet) or result in a <span class="danger-text">wicket</span> (you lose).</div>
+                </div>
+              </div>
+              <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-body">
+                  <div class="step-title">Cash Out Anytime</div>
+                  <div class="step-desc">You can <strong>Cash Out</strong> after any ball to lock in your winnings. The over runs up to 6 deliveries.</div>
+                </div>
+              </div>
+              <div class="step">
+                <div class="step-num">4</div>
+                <div class="step-body">
+                  <div class="step-title">Collect Winnings</div>
+                  <div class="step-desc">Your payout = <strong>Bet × Final Multiplier</strong>. A perfect over (6 deliveries, no wicket) unlocks massive compounded returns.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="step-label" style="margin-top:18px;">SKY BONUSES</div>
+            <div class="rules-note-card">
+              <div class="rn-row">
+                <span class="rn-icon">🚀</span>
+                <div><strong>Jetpack / Small Plane</strong> — rare mid-delivery bonus that multiplies your current stake by <strong>10×</strong></div>
+              </div>
+              <div class="rn-row">
+                <span class="rn-icon">🛩️</span>
+                <div><strong>Big Plane</strong> — extremely rare. Multiplies current stake by <strong>100×</strong></div>
+              </div>
+              <div class="rn-row">
+                <span class="rn-icon">⚡</span>
+                <div><strong>Bonus Buy mode</strong> increases sky contact chance to <strong>{(BONUS_BUY_PROFILE.sky.chance * 100).toFixed(0)}%</strong> per delivery (vs {(STANDARD_PROFILE.sky.chance * 100).toFixed(0)}% standard)</div>
+              </div>
+            </div>
+
+            <div class="step-label" style="margin-top:18px;">BOUNDARY STREAKS</div>
+            <div class="rules-note-card">
+              <div class="rn-row">
+                <span class="rn-icon">🏏</span>
+                <div>Hit <strong>3 or more consecutive 4s or 6s</strong> to trigger the hat-trick streak bonus. Multiplier escalates with each consecutive boundary up to <strong>{STREAK_OVERRIDE_MULTIPLIERS[6]}×</strong>.</div>
+              </div>
+            </div>
+
           </div>
 
+        <!-- ── PAYTABLE ── -->
         {:else if activeTab === 'paytable'}
-          <div class="gi-section">
-            <table class="gi-table">
-              <thead>
-                <tr>
-                  <th>Outcome</th>
-                  <th>Multiplier</th>
-                  <th>Probability</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each STANDARD_PROFILE.outcomes as o}
-                  <tr class:gi-row-danger={o.key === 'catch_out'}>
-                    <td class="gi-outcome-name">
-                      {#if o.key === 'six'}🏏 {t.six}
-                      {:else if o.key === 'four'}🏏 {t.four}
-                      {:else if o.key === 'triple'}🏃 {t.triple}
-                      {:else if o.key === 'double'}🏃 {t.double}
-                      {:else if o.key === 'single'}🏃 {t.single}
-                      {:else if o.key === 'dot'}⚫ {t.dot}
-                      {:else if o.key === 'good_fielding'}🧤 {t.good_fielding}
-                      {:else if o.key === 'catch_out'}❌ {t.catch_out}
-                      {/if}
-                    </td>
-                    <td class="gi-mult"
-                      class:gi-mult-high={o.multiplier >= 1.5}
-                      class:gi-mult-low={o.multiplier < 1 && o.multiplier > 0}
-                      class:gi-mult-zero={o.multiplier === 0}
-                    >
-                      {o.multiplier > 0 ? `${o.multiplier.toFixed(2)}x` : 'LOSS'}
-                    </td>
-                    <td class="gi-prob">{(o.weight * 100).toFixed(1)}%</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+          <div class="gi-content" aria-live="polite">
 
-            <div class="gi-sky-section">
-              <h4 class="gi-sh-sm">✈️ Sky Bonuses</h4>
-              <div class="gi-sky-grid">
-                <div class="gi-sky-card">
-                  <span class="gi-sky-icon">🚀</span>
-                  <span class="gi-sky-name">Jetpack</span>
-                  <span class="gi-sky-mult">10x</span>
-                </div>
-                <div class="gi-sky-card">
-                  <span class="gi-sky-icon">✈️</span>
-                  <span class="gi-sky-name">Small Plane</span>
-                  <span class="gi-sky-mult">10x</span>
-                </div>
-                <div class="gi-sky-card gi-sky-card--rare">
-                  <span class="gi-sky-icon">🛩️</span>
-                  <span class="gi-sky-name">Big Plane</span>
-                  <span class="gi-sky-mult">100x</span>
-                </div>
-              </div>
-              <p class="gi-note">Sky bonus chance: {(STANDARD_PROFILE.sky.chance * 100).toFixed(0)}% per delivery</p>
+            <div class="pt-mode-toggle">
+              <button
+                class="pt-mode-btn"
+                class:active={paytableMode === 'standard'}
+                onclick={() => paytableMode = 'standard'}
+              >STANDARD</button>
+              <button
+                class="pt-mode-btn pt-mode-btn--bonus"
+                class:active={paytableMode === 'bonus'}
+                onclick={() => paytableMode = 'bonus'}
+              >★ BONUS BUY</button>
             </div>
-          </div>
 
-        {:else if activeTab === 'stats'}
-          <div class="gi-section">
-            <div class="gi-stats-grid">
-              <div class="gi-stat-card">
-                <span class="gi-stat-label">{t.rtp}</span>
-                <span class="gi-stat-value gi-stat-rtp">{rtp}%</span>
+            {#if paytableMode === 'bonus'}
+              <div class="bonus-badge">Powerplay mode — enhanced multipliers &amp; lower wicket rate</div>
+            {/if}
+
+            <!-- Outcome rows -->
+            <div class="pt-table">
+              <div class="pt-header">
+                <span>OUTCOME</span>
+                <span>MULTIPLIER</span>
+                <span>CHANCE</span>
               </div>
-              <div class="gi-stat-card">
-                <span class="gi-stat-label">{t.maxWin}</span>
-                <span class="gi-stat-value gi-stat-maxwin">{maxWin}</span>
+              {#each profile.outcomes as o}
+                {@const meta = OUTCOME_META[o.key]}
+                <div
+                  class="pt-row"
+                  class:pt-row--wicket={o.key === 'catch_out'}
+                  class:pt-row--dim={o.multiplier < 1}
+                >
+                  <span class="pt-name">
+                    <span class="pt-icon">{meta?.icon}</span>
+                    <span style="color:{meta?.color}">{meta?.label}</span>
+                  </span>
+                  <span class="pt-mult" style="color:{meta?.color}">
+                    {o.multiplier > 0 ? `${o.multiplier.toFixed(2)}×` : 'LOSS'}
+                  </span>
+                  <span class="pt-prob">{(o.weight * 100).toFixed(1)}%</span>
+                </div>
+              {/each}
+            </div>
+
+            <!-- Sky bonuses -->
+            <div class="step-label" style="margin-top:18px;">SKY BONUSES</div>
+            <div class="sky-grid">
+              <div class="sky-card">
+                <div class="sky-icon">🚀</div>
+                <div class="sky-name">JETPACK</div>
+                <div class="sky-prob">{(profile.sky.weights.jetpack * profile.sky.chance * 100).toFixed(2)}%</div>
+                <div class="sky-mult">10×</div>
               </div>
-              <div class="gi-stat-card">
-                <span class="gi-stat-label">{t.maxSingle}</span>
-                <span class="gi-stat-value">{maxSingle}</span>
+              <div class="sky-card">
+                <div class="sky-icon">✈️</div>
+                <div class="sky-name">SMALL PLANE</div>
+                <div class="sky-prob">{(profile.sky.weights.smallPlane * profile.sky.chance * 100).toFixed(2)}%</div>
+                <div class="sky-mult">10×</div>
+              </div>
+              <div class="sky-card sky-card--rare">
+                <div class="sky-icon">🛩️</div>
+                <div class="sky-name">BIG PLANE</div>
+                <div class="sky-prob">{(profile.sky.weights.bigPlane * profile.sky.chance * 100).toFixed(2)}%</div>
+                <div class="sky-mult rare-mult">100×</div>
               </div>
             </div>
-            <p class="gi-note">
-              RTP is the theoretical statistical return calculated over a large number of rounds.
-              Individual session results may vary significantly above or below the stated RTP.
-            </p>
+
+            <!-- Streak ladder -->
+            <div class="step-label" style="margin-top:18px;">BOUNDARY STREAK BONUS</div>
+            <div class="streak-row">
+              {#each streakEntries as s}
+                <div class="streak-card">
+                  <div class="streak-num">{s.streak}+</div>
+                  <div class="streak-label">in a row</div>
+                  <div class="streak-mult">{s.mult}×</div>
+                </div>
+              {/each}
+            </div>
+            <p class="gi-note">Consecutive 4s or 6s — streak resets on any other outcome.</p>
+
+            <!-- Caps -->
+            <div class="caps-row">
+              <div class="cap-card">
+                <div class="cap-label">MAX PER BALL</div>
+                <div class="cap-val">{CAP_SINGLE_BALL_MULTIPLIER}×</div>
+              </div>
+              <div class="cap-card">
+                <div class="cap-label">MAX WIN CAP</div>
+                <div class="cap-val gold">{CAP_OVER_TOTAL_MULTIPLIER}×</div>
+              </div>
+            </div>
+
           </div>
 
+        <!-- ── FEATURES ── -->
+        {:else if activeTab === 'features'}
+          <div class="gi-content" aria-live="polite">
+
+            <div class="feat-card feat-card--bonus">
+              <div class="feat-header">
+                <span class="feat-icon">★</span>
+                <div>
+                  <div class="feat-name">BONUS BUY</div>
+                  <div class="feat-tag">POWERPLAY MODE</div>
+                </div>
+                <div class="feat-cost">+30% surcharge</div>
+              </div>
+              <div class="feat-body">
+                <p>Pays a 30% premium on your bet to enter Powerplay mode for the next over. Significantly improves multipliers, reduces wicket probability, and boosts sky bonus contact rate.</p>
+              </div>
+              <div class="feat-stats">
+                <div class="feat-stat">
+                  <span class="fs-label">MIN BET</span>
+                  <span class="fs-val">15</span>
+                </div>
+                <div class="feat-stat">
+                  <span class="fs-label">SKY CHANCE</span>
+                  <span class="fs-val green">{(BONUS_BUY_PROFILE.sky.chance * 100).toFixed(0)}%</span>
+                </div>
+                <div class="feat-stat">
+                  <span class="fs-label">WICKET RATE</span>
+                  <span class="fs-val green">{(BONUS_BUY_PROFILE.outcomes.find(o => o.key === 'catch_out')!.weight * 100).toFixed(0)}%</span>
+                </div>
+                <div class="feat-stat">
+                  <span class="fs-label">SIX MULT</span>
+                  <span class="fs-val gold">{BONUS_BUY_PROFILE.outcomes.find(o => o.key === 'six')!.multiplier}×</span>
+                </div>
+              </div>
+              <div class="feat-compare">
+                <div class="compare-col">
+                  <div class="cmp-label">Standard</div>
+                  <div class="cmp-val dim">Sky: {(STANDARD_PROFILE.sky.chance * 100).toFixed(0)}%</div>
+                  <div class="cmp-val dim">Wicket: {(STANDARD_PROFILE.outcomes.find(o => o.key === 'catch_out')!.weight * 100).toFixed(0)}%</div>
+                  <div class="cmp-val dim">Six: {STANDARD_PROFILE.outcomes.find(o => o.key === 'six')!.multiplier}×</div>
+                </div>
+                <div class="cmp-arrow">→</div>
+                <div class="compare-col">
+                  <div class="cmp-label green">Bonus Buy</div>
+                  <div class="cmp-val green">Sky: {(BONUS_BUY_PROFILE.sky.chance * 100).toFixed(0)}%</div>
+                  <div class="cmp-val green">Wicket: {(BONUS_BUY_PROFILE.outcomes.find(o => o.key === 'catch_out')!.weight * 100).toFixed(0)}%</div>
+                  <div class="cmp-val green">Six: {BONUS_BUY_PROFILE.outcomes.find(o => o.key === 'six')!.multiplier}×</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="feat-card feat-card--ins">
+              <div class="feat-header">
+                <span class="feat-icon">🛡</span>
+                <div>
+                  <div class="feat-name">INSURANCE</div>
+                  <div class="feat-tag">WICKET PROTECTION</div>
+                </div>
+                <div class="feat-cost">10% of bet (min 20)</div>
+              </div>
+              <div class="feat-body">
+                <p>Pay a small premium before the over. If a wicket falls at any point during that over, your original bet is refunded in full — you keep your accumulated multiplier winnings too.</p>
+              </div>
+              <div class="feat-stats">
+                <div class="feat-stat">
+                  <span class="fs-label">MIN BET</span>
+                  <span class="fs-val">20</span>
+                </div>
+                <div class="feat-stat">
+                  <span class="fs-label">COST</span>
+                  <span class="fs-val">10% of bet</span>
+                </div>
+                <div class="feat-stat">
+                  <span class="fs-label">COVERS</span>
+                  <span class="fs-val green">1 WICKET</span>
+                </div>
+                <div class="feat-stat">
+                  <span class="fs-label">REFUND</span>
+                  <span class="fs-val gold">FULL BET</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="feat-card feat-card--autobet">
+              <div class="feat-header">
+                <span class="feat-icon">🔄</span>
+                <div>
+                  <div class="feat-name">AUTOBET</div>
+                  <div class="feat-tag">AUTOMATED PLAY</div>
+                </div>
+              </div>
+              <div class="feat-body">
+                <p>Automate consecutive rounds. Set a round count, stop-on-loss threshold, stop-on-win target, or exit multiplier. Use the speed selector to control pace from Slow to Turbo.</p>
+              </div>
+              <div class="feat-stats">
+                <div class="feat-stat"><span class="fs-label">SLOW</span><span class="fs-val">🐢 4.5s</span></div>
+                <div class="feat-stat"><span class="fs-label">NORMAL</span><span class="fs-val">▶ 1.2s</span></div>
+                <div class="feat-stat"><span class="fs-label">FAST</span><span class="fs-val">▶▶ 0.5s</span></div>
+                <div class="feat-stat"><span class="fs-label">TURBO</span><span class="fs-val gold">⚡ 0.3s</span></div>
+              </div>
+            </div>
+
+          </div>
+
+        <!-- ── LEGAL ── -->
         {:else if activeTab === 'legal'}
-          <div class="gi-section gi-legal">
-            <div class="gi-disclaimer">
-              <h4>⚠️ Important Notices</h4>
-              <ol class="gi-legal-list">
-                <li><strong>Malfunctions void all pays and plays.</strong> In the event of a system malfunction, all bets and payouts from the affected round(s) are void.</li>
-                <li><strong>A stable internet connection is required.</strong> The operator is not responsible for disruptions caused by connectivity issues on the player's end.</li>
-                <li><strong>The RTP (Return to Player) of this game is {rtp}%.</strong> This represents the theoretical long-term expected payback percentage. Individual sessions may vary.</li>
-                <li><strong>Maximum win per round is capped at {maxWin} the bet amount.</strong> Any combination of multipliers exceeding this cap will be adjusted accordingly.</li>
-                <li><strong>All game outcomes are determined by the Stake RGS (Remote Gaming Server).</strong> The visual simulation is representational only and does not influence results.</li>
-                <li><strong>Players must be of legal gambling age</strong> in their jurisdiction to play this game.</li>
-                <li><strong>© {new Date().getFullYear()} Cricket Crash.</strong> All rights reserved. Unauthorized reproduction or distribution is prohibited.</li>
-              </ol>
+          <div class="gi-content" aria-live="polite">
+
+            <div class="legal-rtp-banner">
+              <div class="lrb-col">
+                <div class="lrb-label">STANDARD RTP</div>
+                <div class="lrb-val green">{rtpStd}%</div>
+              </div>
+              <div class="lrb-divider"></div>
+              <div class="lrb-col">
+                <div class="lrb-label">BONUS BUY RTP</div>
+                <div class="lrb-val gold">{rtpBonus}%</div>
+              </div>
+              <div class="lrb-divider"></div>
+              <div class="lrb-col">
+                <div class="lrb-label">MAX WIN CAP</div>
+                <div class="lrb-val">{CAP_OVER_TOTAL_MULTIPLIER}×</div>
+              </div>
             </div>
+
+            <div class="legal-list">
+              <div class="legal-item">
+                <div class="legal-num">01</div>
+                <div class="legal-text">
+                  <strong>Malfunctions void all pays and plays.</strong> In the event of a system or network malfunction, all bets and payouts from the affected round are void and stakes will be returned.
+                </div>
+              </div>
+              <div class="legal-item">
+                <div class="legal-num">02</div>
+                <div class="legal-text">
+                  <strong>A stable internet connection is required.</strong> The operator assumes no responsibility for service interruptions caused by connectivity issues on the player's end.
+                </div>
+              </div>
+              <div class="legal-item">
+                <div class="legal-num">03</div>
+                <div class="legal-text">
+                  <strong>All game outcomes are determined by the Stake RGS (Remote Gaming Server).</strong> The 3D cricket simulation shown on-screen is representational only and does not influence game results in any way.
+                </div>
+              </div>
+              <div class="legal-item">
+                <div class="legal-num">04</div>
+                <div class="legal-text">
+                  <strong>RTP represents the theoretical long-term payback percentage.</strong> Standard mode is {rtpStd}%; Bonus Buy (Powerplay) mode is {rtpBonus}%. Individual sessions may vary significantly above or below these figures.
+                </div>
+              </div>
+              <div class="legal-item">
+                <div class="legal-num">05</div>
+                <div class="legal-text">
+                  <strong>Maximum win per round is capped at {CAP_OVER_TOTAL_MULTIPLIER}× the bet amount.</strong> Any combination of delivery multipliers and bonus events that would exceed this cap will be adjusted accordingly at settlement.
+                </div>
+              </div>
+              <div class="legal-item">
+                <div class="legal-num">06</div>
+                <div class="legal-text">
+                  <strong>Provably fair outcomes.</strong> Results are generated via HMAC-SHA256 using a server seed (hash published pre-round) combined with a client seed and nonce. The full server seed is revealed after each session, allowing independent verification.
+                </div>
+              </div>
+              <div class="legal-item">
+                <div class="legal-num">07</div>
+                <div class="legal-text">
+                  <strong>Players must be of legal gambling age</strong> in their jurisdiction to participate. Gambling can be addictive — please play responsibly.
+                </div>
+              </div>
+              <div class="legal-item">
+                <div class="legal-num">08</div>
+                <div class="legal-text">
+                  <strong>© {new Date().getFullYear()} Cricket Crash.</strong> All rights reserved. Game design, mechanics, and visual content are proprietary. Unauthorized reproduction or distribution is prohibited.
+                </div>
+              </div>
+            </div>
+
           </div>
         {/if}
+
       </div>
     </div>
   </div>
 {/if}
 
 <style>
+  /* ── Backdrop ─────────────────────────────────────────────────────────────── */
   .gi-backdrop {
     position: fixed;
     inset: 0;
@@ -296,92 +450,115 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.82);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    animation: gi-fade-in 0.22s ease-out;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    animation: gi-fade 0.2s ease-out;
+    padding: 16px;
   }
 
-  @keyframes gi-fade-in {
+  @keyframes gi-fade {
     from { opacity: 0; }
-    to { opacity: 1; }
+    to   { opacity: 1; }
   }
 
+  /* ── Panel ───────────────────────────────────────────────────────────────── */
   .gi-panel {
-    width: 92vw;
-    max-width: 520px;
-    max-height: 82vh;
+    width: 100%;
+    max-width: 500px;
+    max-height: min(88vh, 680px);
     display: flex;
     flex-direction: column;
-    border-radius: 18px;
-    background: rgba(8, 12, 22, 0.97);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    background: linear-gradient(160deg, rgba(14, 20, 38, 0.98) 0%, rgba(8, 12, 24, 0.99) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.09);
     box-shadow:
-      0 24px 64px rgba(0, 0, 0, 0.6),
-      0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+      0 32px 80px rgba(0, 0, 0, 0.7),
+      0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+      0 1px 0 rgba(255, 255, 255, 0.08) inset;
     overflow: hidden;
-    animation: gi-slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+    animation: gi-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  @keyframes gi-slide-up {
-    from { transform: translateY(20px) scale(0.97); opacity: 0; }
-    to { transform: translateY(0) scale(1); opacity: 1; }
+  @keyframes gi-up {
+    from { transform: translateY(24px) scale(0.96); opacity: 0; }
+    to   { transform: translateY(0) scale(1); opacity: 1; }
   }
 
+  /* ── Header ──────────────────────────────────────────────────────────────── */
   .gi-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 20px 12px;
+    padding: 16px 18px 14px;
+    background: linear-gradient(135deg, rgba(255,184,0,0.06) 0%, rgba(0,255,136,0.04) 100%);
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .gi-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .gi-logo {
+    font-size: 2rem;
+    filter: drop-shadow(0 0 10px rgba(255, 200, 0, 0.4));
   }
 
   .gi-title {
+    font-family: 'Outfit', sans-serif;
     font-size: 1.05rem;
     font-weight: 900;
-    letter-spacing: 0.08em;
-    color: rgba(255, 255, 255, 0.92);
-    margin: 0;
+    letter-spacing: 0.06em;
+    color: #fff;
+    line-height: 1.1;
+  }
+
+  .gi-subtitle {
+    font-size: 0.55rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    color: rgba(255, 255, 255, 0.38);
+    text-transform: uppercase;
+    margin-top: 2px;
   }
 
   .gi-close {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 0.9rem;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.85rem;
     cursor: pointer;
     display: grid;
     place-items: center;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    flex-shrink: 0;
   }
+  .gi-close:hover { border-color: rgba(255,255,255,0.22); background: rgba(255,255,255,0.09); color: #fff; }
 
-  .gi-close:hover {
-    border-color: rgba(255, 255, 255, 0.25);
-    background: rgba(255, 255, 255, 0.1);
-  }
-
+  /* ── Tabs ────────────────────────────────────────────────────────────────── */
   .gi-tabs {
     display: flex;
-    gap: 0;
-    padding: 0 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     overflow-x: auto;
     scrollbar-width: none;
+    flex-shrink: 0;
   }
-
   .gi-tabs::-webkit-scrollbar { display: none; }
 
   .gi-tab {
     flex: 1;
-    padding: 10px 8px;
-    font-size: 0.62rem;
+    min-width: max-content;
+    padding: 11px 10px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.55rem;
     font-weight: 900;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.38);
+    letter-spacing: 0.10em;
+    color: rgba(255, 255, 255, 0.32);
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
@@ -389,295 +566,467 @@
     transition: color 0.15s, border-color 0.15s;
     white-space: nowrap;
   }
-
-  .gi-tab:hover {
-    color: rgba(255, 255, 255, 0.6);
+  .gi-tab:hover { color: rgba(255,255,255,0.6); }
+  .gi-tab.active {
+    color: rgba(255, 255, 255, 0.95);
+    border-bottom-color: #00ff88;
   }
 
-  .gi-tab--active {
-    color: rgba(255, 255, 255, 0.92);
-    border-bottom-color: var(--color-neon-green, #00ff88);
-  }
-
+  /* ── Body ────────────────────────────────────────────────────────────────── */
   .gi-body {
     flex: 1;
     overflow-y: auto;
-    padding: 16px 20px 24px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
   }
+  .gi-body::-webkit-scrollbar { width: 4px; }
+  .gi-body::-webkit-scrollbar-track { background: transparent; }
+  .gi-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 
-  .gi-section {
-    animation: gi-content-in 0.2s ease-out;
+  .gi-content {
+    padding: 18px 18px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    animation: gi-content-in 0.18s ease-out;
   }
 
   @keyframes gi-content-in {
     from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
+    to   { opacity: 1; transform: translateY(0); }
   }
 
-  .gi-sh {
-    font-size: 0.85rem;
+  /* ── Shared helpers ──────────────────────────────────────────────────────── */
+  .step-label {
+    font-size: 0.48rem;
     font-weight: 900;
-    letter-spacing: 0.04em;
-    color: rgba(255, 255, 255, 0.88);
-    margin: 0 0 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.28);
   }
 
-  .gi-sh-sm {
+  .gi-note {
+    font-size: 0.64rem;
+    color: rgba(255,255,255,0.32);
+    font-style: italic;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .green { color: #00ff88; }
+  .gold  { color: #ffc800; }
+  .dim   { color: rgba(255,255,255,0.35); }
+  .danger-text { color: #ff4455; font-weight: 700; }
+
+  /* ── Rules ───────────────────────────────────────────────────────────────── */
+  .gi-intro-card {
+    background: rgba(0, 255, 136, 0.05);
+    border: 1px solid rgba(0, 255, 136, 0.12);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 0.76rem;
+    line-height: 1.55;
+    color: rgba(255,255,255,0.72);
+  }
+  .gi-intro-card p { margin: 0; }
+
+  .steps { display: flex; flex-direction: column; gap: 8px; }
+
+  .step {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+
+  .step-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #00ff88 0%, #00cc6e 100%);
+    color: #002211;
     font-size: 0.72rem;
     font-weight: 900;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.65);
-    margin: 18px 0 10px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    box-shadow: 0 0 10px rgba(0,255,136,0.25);
   }
 
-  .gi-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+  .step-body { flex: 1; }
+
+  .step-title {
+    font-size: 0.78rem;
+    font-weight: 900;
+    color: rgba(255,255,255,0.92);
+    margin-bottom: 3px;
+    letter-spacing: 0.02em;
+  }
+
+  .step-desc {
+    font-size: 0.70rem;
+    line-height: 1.5;
+    color: rgba(255,255,255,0.58);
+  }
+  .step-desc strong { color: rgba(255,255,255,0.88); }
+
+  .rules-note-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
 
-  .gi-list li {
-    position: relative;
-    padding-left: 18px;
-    font-size: 0.78rem;
+  .rn-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 0.71rem;
     line-height: 1.5;
-    color: rgba(255, 255, 255, 0.68);
+    color: rgba(255,255,255,0.6);
+  }
+  .rn-row strong { color: rgba(255,255,255,0.9); }
+  .rn-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+
+  /* ── Paytable ────────────────────────────────────────────────────────────── */
+  .pt-mode-toggle {
+    display: flex;
+    gap: 6px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.04);
+    padding: 4px;
+    border: 1px solid rgba(255,255,255,0.06);
   }
 
-  .gi-list li::before {
-    content: '▸';
-    position: absolute;
-    left: 0;
-    color: var(--color-neon-green, #00ff88);
+  .pt-mode-btn {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 7px;
+    border: 1px solid transparent;
+    background: transparent;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.60rem;
     font-weight: 900;
+    letter-spacing: 0.10em;
+    color: rgba(255,255,255,0.38);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .pt-mode-btn.active {
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.92);
+  }
+  .pt-mode-btn--bonus.active {
+    background: rgba(255,200,0,0.1);
+    border-color: rgba(255,200,0,0.25);
+    color: #ffc800;
   }
 
-  .gi-list li strong {
-    color: rgba(255, 255, 255, 0.92);
-  }
-
-  /* ── Paytable ── */
-  .gi-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.75rem;
-  }
-
-  .gi-table th {
-    text-align: left;
-    padding: 8px 6px;
-    font-size: 0.6rem;
-    font-weight: 900;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.35);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .gi-table td {
-    padding: 8px 6px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .gi-table tr:hover td {
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  .gi-outcome-name {
+  .bonus-badge {
+    font-size: 0.62rem;
+    color: #ffc800;
+    background: rgba(255,200,0,0.08);
+    border: 1px solid rgba(255,200,0,0.18);
+    border-radius: 8px;
+    padding: 6px 12px;
+    text-align: center;
     font-weight: 700;
   }
 
-  .gi-mult {
+  .pt-table {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .pt-header {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.04);
+    font-size: 0.48rem;
+    font-weight: 900;
+    letter-spacing: 0.18em;
+    color: rgba(255,255,255,0.28);
+    text-transform: uppercase;
+  }
+
+  .pt-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 12px;
+    border-top: 1px solid rgba(255,255,255,0.04);
+    transition: background 0.1s;
+  }
+  .pt-row:hover { background: rgba(255,255,255,0.025); }
+  .pt-row--wicket { background: rgba(255,30,60,0.06); }
+  .pt-row--dim { opacity: 0.7; }
+
+  .pt-name {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.73rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+  }
+  .pt-icon { font-size: 0.95rem; }
+
+  .pt-mult {
+    font-size: 0.80rem;
     font-weight: 900;
     font-variant-numeric: tabular-nums;
+    min-width: 52px;
+    text-align: right;
   }
 
-  .gi-mult-high {
-    color: #00ff88;
-    text-shadow: 0 0 8px rgba(0, 255, 136, 0.3);
-  }
-
-  .gi-mult-low {
-    color: #fbbf24;
-  }
-
-  .gi-mult-zero {
-    color: #ff3b3b;
-    text-shadow: 0 0 8px rgba(255, 59, 59, 0.3);
-  }
-
-  .gi-prob {
+  .pt-prob {
+    font-size: 0.68rem;
     font-variant-numeric: tabular-nums;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(255,255,255,0.38);
+    min-width: 40px;
+    text-align: right;
   }
 
-  .gi-row-danger td {
-    background: rgba(255, 30, 60, 0.06);
-  }
-
-  /* ── Sky bonuses ── */
-  .gi-sky-grid {
+  /* Sky grid */
+  .sky-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
   }
 
-  .gi-sky-card {
+  .sky-card {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    padding: 12px 6px;
+    padding: 14px 8px;
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    text-align: center;
+  }
+  .sky-card--rare {
+    border-color: rgba(200,100,255,0.22);
+    background: rgba(200,100,255,0.05);
   }
 
-  .gi-sky-card--rare {
-    border-color: rgba(255, 43, 214, 0.25);
-    background: rgba(255, 43, 214, 0.06);
-  }
+  .sky-icon   { font-size: 1.5rem; }
+  .sky-name   { font-size: 0.48rem; font-weight: 900; letter-spacing: 0.12em; color: rgba(255,255,255,0.4); text-transform: uppercase; }
+  .sky-prob   { font-size: 0.58rem; color: rgba(255,255,255,0.3); font-variant-numeric: tabular-nums; }
+  .sky-mult   { font-size: 1rem; font-weight: 900; color: #ffc800; text-shadow: 0 0 8px rgba(255,200,0,0.35); }
+  .rare-mult  { color: #cc66ff; text-shadow: 0 0 8px rgba(180,80,255,0.4); }
 
-  .gi-sky-icon { font-size: 1.4rem; }
-
-  .gi-sky-name {
-    font-size: 0.58rem;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    color: rgba(255, 255, 255, 0.5);
-    text-transform: uppercase;
-  }
-
-  .gi-sky-mult {
-    font-size: 0.85rem;
-    font-weight: 900;
-    color: #ffc800;
-    text-shadow: 0 0 8px rgba(255, 200, 0, 0.35);
-  }
-
-  .gi-sky-card--rare .gi-sky-mult {
-    color: #ff2bd6;
-    text-shadow: 0 0 8px rgba(255, 43, 214, 0.4);
-  }
-
-  .gi-note {
-    font-size: 0.66rem;
-    color: rgba(255, 255, 255, 0.35);
-    margin-top: 12px;
-    line-height: 1.5;
-    font-style: italic;
-  }
-
-  /* ── Stats ── */
-  .gi-stats-grid {
+  /* Streak */
+  .streak-row {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
   }
 
-  .gi-stat-card {
+  .streak-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 16px 8px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .gi-stat-label {
-    font-size: 0.55rem;
-    font-weight: 900;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.38);
+    gap: 3px;
+    padding: 12px 6px;
+    border-radius: 12px;
+    background: rgba(255,184,0,0.06);
+    border: 1px solid rgba(255,184,0,0.15);
     text-align: center;
   }
 
-  .gi-stat-value {
-    font-size: 1.3rem;
-    font-weight: 900;
-    color: rgba(255, 255, 255, 0.92);
+  .streak-num   { font-size: 1.1rem; font-weight: 900; color: #ffc800; line-height: 1; }
+  .streak-label { font-size: 0.44rem; font-weight: 700; letter-spacing: 0.10em; color: rgba(255,255,255,0.3); text-transform: uppercase; }
+  .streak-mult  { font-size: 0.85rem; font-weight: 900; color: #fff; }
+
+  /* Caps */
+  .caps-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
-  .gi-stat-rtp {
-    color: #00ff88;
-    text-shadow: 0 0 12px rgba(0, 255, 136, 0.4);
-  }
-
-  .gi-stat-maxwin {
-    color: #ffc800;
-    text-shadow: 0 0 12px rgba(255, 200, 0, 0.35);
-  }
-
-  /* ── Legal ── */
-  .gi-disclaimer h4 {
-    font-size: 0.78rem;
-    font-weight: 900;
-    color: #fbbf24;
-    margin: 0 0 12px;
-  }
-
-  .gi-legal-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    counter-reset: legal;
+  .cap-card {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    align-items: center;
+    gap: 5px;
+    padding: 14px 10px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
   }
 
-  .gi-legal-list li {
-    counter-increment: legal;
-    position: relative;
-    padding-left: 28px;
-    font-size: 0.72rem;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.58);
+  .cap-label { font-size: 0.48rem; font-weight: 900; letter-spacing: 0.16em; color: rgba(255,255,255,0.3); text-transform: uppercase; }
+  .cap-val   { font-size: 1.4rem; font-weight: 900; color: rgba(255,255,255,0.85); }
+  .cap-val.gold { color: #ffc800; text-shadow: 0 0 12px rgba(255,200,0,0.3); }
+
+  /* ── Features ────────────────────────────────────────────────────────────── */
+  .feat-card {
+    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.03);
+    overflow: hidden;
+  }
+  .feat-card--bonus { border-color: rgba(255,200,0,0.18); }
+  .feat-card--ins   { border-color: rgba(0,200,255,0.15); }
+  .feat-card--autobet { border-color: rgba(120,80,255,0.18); }
+
+  .feat-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.03);
   }
 
-  .gi-legal-list li::before {
-    content: counter(legal);
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    font-size: 0.55rem;
+  .feat-icon { font-size: 1.4rem; flex-shrink: 0; }
+
+  .feat-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.82rem;
     font-weight: 900;
-    color: rgba(255, 255, 255, 0.4);
+    letter-spacing: 0.06em;
+    color: rgba(255,255,255,0.92);
+  }
+  .feat-tag {
+    font-size: 0.46rem;
+    font-weight: 900;
+    letter-spacing: 0.16em;
+    color: rgba(255,255,255,0.32);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .feat-cost {
+    margin-left: auto;
+    font-size: 0.60rem;
+    font-weight: 800;
+    color: #ffc800;
+    background: rgba(255,200,0,0.1);
+    border: 1px solid rgba(255,200,0,0.2);
+    border-radius: 8px;
+    padding: 4px 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .feat-body {
+    padding: 12px 14px 6px;
+    font-size: 0.71rem;
+    line-height: 1.55;
+    color: rgba(255,255,255,0.58);
+  }
+  .feat-body p { margin: 0; }
+
+  .feat-stats {
     display: grid;
-    place-items: center;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border-top: 1px solid rgba(255,255,255,0.05);
   }
 
-  .gi-legal-list li strong {
-    color: rgba(255, 255, 255, 0.88);
+  .feat-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 10px 6px;
+    border-right: 1px solid rgba(255,255,255,0.05);
+    text-align: center;
+  }
+  .feat-stat:last-child { border-right: none; }
+
+  .fs-label { font-size: 0.42rem; font-weight: 900; letter-spacing: 0.14em; color: rgba(255,255,255,0.25); text-transform: uppercase; }
+  .fs-val   { font-size: 0.68rem; font-weight: 900; color: rgba(255,255,255,0.82); white-space: nowrap; }
+  .fs-val.green { color: #00ff88; }
+  .fs-val.gold  { color: #ffc800; }
+
+  .feat-compare {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px 12px;
+    border-top: 1px solid rgba(255,255,255,0.05);
   }
 
+  .compare-col { display: flex; flex-direction: column; gap: 2px; }
+  .cmp-label   { font-size: 0.52rem; font-weight: 900; letter-spacing: 0.10em; color: rgba(255,255,255,0.38); text-transform: uppercase; margin-bottom: 2px; }
+  .cmp-val     { font-size: 0.62rem; font-weight: 700; }
+  .cmp-arrow   { font-size: 1rem; color: rgba(255,255,255,0.2); flex-shrink: 0; margin: 0 4px; }
+
+  /* ── Legal ───────────────────────────────────────────────────────────────── */
+  .legal-rtp-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px;
+    padding: 14px 10px;
+  }
+
+  .lrb-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .lrb-label { font-size: 0.46rem; font-weight: 900; letter-spacing: 0.16em; color: rgba(255,255,255,0.3); text-transform: uppercase; }
+  .lrb-val { font-size: 1.15rem; font-weight: 900; color: rgba(255,255,255,0.85); }
+  .lrb-val.green { color: #00ff88; text-shadow: 0 0 10px rgba(0,255,136,0.3); }
+  .lrb-val.gold  { color: #ffc800; text-shadow: 0 0 10px rgba(255,200,0,0.3); }
+  .lrb-divider { width: 1px; height: 40px; background: rgba(255,255,255,0.07); }
+
+  .legal-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .legal-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .legal-item:last-child { border-bottom: none; }
+
+  .legal-num {
+    font-size: 0.58rem;
+    font-weight: 900;
+    color: rgba(255,255,255,0.2);
+    letter-spacing: 0.05em;
+    padding-top: 1px;
+    flex-shrink: 0;
+    width: 22px;
+  }
+
+  .legal-text {
+    font-size: 0.70rem;
+    line-height: 1.6;
+    color: rgba(255,255,255,0.52);
+  }
+  .legal-text strong { color: rgba(255,255,255,0.82); }
+
+  /* ── Responsive ──────────────────────────────────────────────────────────── */
   @media (max-width: 480px) {
     .gi-panel {
-      max-height: 90vh;
-      border-radius: 14px 14px 0 0;
-      max-width: 100vw;
-      width: 100vw;
+      max-height: 92dvh;
+      border-radius: 16px 16px 0 0;
+      max-width: 100%;
     }
 
-    .gi-stats-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .gi-sky-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
+    .feat-stats { grid-template-columns: repeat(2, 1fr); }
+    .streak-row { grid-template-columns: repeat(4, 1fr); }
+    .sky-grid   { grid-template-columns: repeat(3, 1fr); }
+    .caps-row   { grid-template-columns: 1fr 1fr; }
   }
 </style>

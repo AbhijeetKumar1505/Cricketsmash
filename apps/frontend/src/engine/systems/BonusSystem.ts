@@ -95,7 +95,7 @@ export class BonusSystem {
         zone.role === 'profitMult'
           ? 10 + zoneHash(zone.id + '|profit') % 26
           : zone.role === 'movingMult'
-            ? 1.12 + (zoneHash(zone.id + '|mv') % 19) / 10
+            ? (zone.profitMultValue ?? (1.12 + (zoneHash(zone.id + '|mv') % 19) / 10))
             : 1;
       this._idCounter += 1;
       this._active.push(
@@ -129,5 +129,5 @@ function pickBonusType(zone: BonusSkillZone): BonusType {
     return 'plus2';
   }
   if (zone.role === 'profitMult') return 'multiplier';
-  return zone.visual === 'spider' ? 'plus2' : 'multiplier';
+  return 'multiplier';
 }

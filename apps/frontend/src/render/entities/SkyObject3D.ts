@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import type { SkyObjectSnapshot, SkyObjectType } from '../../engine/sky/types.js';
+import { bonusGLBAssets } from './BonusGLBAssets.js';
 
 function emissiveMat(hex: number, emissiveHex: number): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
@@ -84,6 +85,18 @@ export class SkyObject3D {
     else this._buildBigPlane();
   }
 
+  private _tryGLBAircraft(scaleMult: number): boolean {
+    const model = bonusGLBAssets.getClone('aircraft');
+    if (!model) return false;
+    // processScene already normalized scale; multiply for small vs big plane sizing.
+    model.scale.multiplyScalar(scaleMult);
+    model.traverse(o => {
+      if (o instanceof THREE.Mesh) this._parts.push(o);
+    });
+    this.root.add(model);
+    return true;
+  }
+
   private _buildJetpack(): void {
     const body = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.22, 0.5, 6, 10),
@@ -112,6 +125,7 @@ export class SkyObject3D {
   }
 
   private _buildSmallPlane(): void {
+    if (this._tryGLBAircraft(1.0)) return;
     const fuse = new THREE.Mesh(
       new THREE.CylinderGeometry(0.12, 0.16, 1.1, 10),
       emissiveMat(0xc4f0ff, 0x7ae0ff),
@@ -143,6 +157,7 @@ export class SkyObject3D {
   }
 
   private _buildBigPlane(): void {
+    if (this._tryGLBAircraft(1.4)) return;  // was 2.0; reduced since spawn is now closer
     const fuse = new THREE.Mesh(
       new THREE.CylinderGeometry(0.2, 0.24, 2.2, 12),
       emissiveMat(0xf0e6ff, 0xff6fe0),

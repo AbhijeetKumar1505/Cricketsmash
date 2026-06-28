@@ -102,6 +102,16 @@
     return s;
   });
 
+  // Special delivery = warrants full broadcast card (boundary, wicket, sky hit).
+  const isSpecialDelivery = $derived.by(() => {
+    const outcome = game.overSummary[0];
+    if (!outcome) return false;
+    if (outcome.kind === 'wicket') return true;
+    if (outcome.kind === 'runs' && outcome.runs >= 4) return true;
+    if (game.skyHitToast != null) return true;
+    return false;
+  });
+
   // ─── Commentary ───
   const commentaryKey = $derived(game.deliveryKey * 10);
   const commentaryText = $derived.by(() => {
@@ -237,14 +247,6 @@
     // reserved for future viewport-aware adjustments
   }
 
-  // ─── Hit-flash overlay (driven by AnimationBrain via gameBus) ─────────────
-  let hitFlashIntensity = $state(0);
-  let hitFlashKey = $state(0);
-  onMount(() => gameBus.on('HIT_FLASH', ({ intensity, key }) => {
-    hitFlashIntensity = intensity;
-    hitFlashKey = key;
-  }));
-
   // Direct contact audio — fires at exact contact frame, bypasses $effect latency
   onMount(() => gameBus.on('HIT_AUDIO', ({ intensity }) => {
     if (!soundOn) return;
@@ -288,6 +290,7 @@
       rewardToast={game.pendingRewardToast}
       skyHitToast={game.skyHitToast}
       {scorecardData}
+      isSpecialResult={isSpecialDelivery}
       resultStage1HoldMs={game.turboPlay || game.autoPlayOn ? 400 : 1400}
     >
       <CricketSimulation />
@@ -335,16 +338,6 @@
     {locale}
   />
 
-  <!-- ─── Hit-flash overlay (fires on bat contact) ─── -->
-  {#key hitFlashKey}
-    {#if hitFlashIntensity > 0}
-      <div
-        class="hit-flash"
-        style="--intensity: {hitFlashIntensity}"
-        aria-hidden="true"
-      ></div>
-    {/if}
-  {/key}
 
   <!-- ─── Animation Debug HUD (Ctrl+Shift+A) ─── -->
   <AnimDebugOverlay />
@@ -536,22 +529,6 @@
     to   { transform: translateY(0); opacity: 1; }
   }
 
-  /* ─── Hit-flash overlay ─── */
-  .hit-flash {
-    position: fixed;
-    inset: 0;
-    background: #fff;
-    opacity: 0;
-    pointer-events: none;
-    z-index: 9999;
-    animation: hit-flash-pulse 160ms ease-out forwards;
-    mix-blend-mode: screen;
-  }
-  @keyframes hit-flash-pulse {
-    0%   { opacity: 0; }
-    18%  { opacity: calc(var(--intensity, 0.5) * 0.55); }
-    100% { opacity: 0; }
-  }
 
   /* ─── Responsive collapse ─── */
   @media (max-width: 1100px) {

@@ -20,7 +20,7 @@ export const SKY_OBJECT_CHANCE_BONUS_BUY = profileForMode(GAME_MODES.POWERPLAY).
  * These are display/cinematic frequencies and can be higher than payout-impact rates.
  */
 export const SKY_OBJECT_VISUAL_CHANCE_STANDARD = 0.18;
-export const SKY_OBJECT_VISUAL_CHANCE_BONUS_BUY = 0.24;
+export const SKY_OBJECT_VISUAL_CHANCE_BONUS_BUY = 0.35;
 
 export function skyObjectChanceForMode(mode: GameModeName): number {
   return profileForMode(mode).sky.chance;
@@ -54,9 +54,9 @@ export function spawnWorldPosition(type: SkyObjectType, rng: () => number): { x:
       };
     case 'BIG_PLANE':
       return {
-        x: base.x + (rng() * 2 - 1),
-        y: base.y + 13,
-        z: base.z - 38,
+        x: base.x + (rng() * 4 - 2),
+        y: base.y + 8,   // was +13: lowered so angle from camera is ~19° (inside 23° FOV)
+        z: base.z - 26,  // was -38: closer so it occupies visible sky
       };
     default:
       return { x: base.x, y: base.y + 6, z: base.z - 18 };
@@ -70,7 +70,7 @@ export function velocityForSkyType(type: SkyObjectType): { x: number; y: number;
     case 'SMALL_PLANE':
       return { x: -3.5, y: 0, z: 0 };
     case 'BIG_PLANE':
-      return { x: -1.6, y: 0, z: 0 };
+      return { x: -1.8, y: 0, z: -0.3 };  // slight -Z drift for depth feel
     default:
       return { x: 0, y: 0, z: 0 };
   }

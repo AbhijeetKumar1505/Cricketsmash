@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { BonusSnapshot } from '../../engine/bonus/types.js';
+import { bonusGLBAssets } from './BonusGLBAssets.js';
 
 const CORE_VERT = `
 varying vec3 vNormalW;
@@ -301,98 +302,40 @@ export class BonusObject3D {
     }
 
     if (this.propKind === 'spider') {
-      const cableMat = new THREE.MeshBasicMaterial({ color: 0xe8eef7 });
-      const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.85, 8), cableMat);
-      cable.rotation.z = Math.PI / 2;
-      cable.position.set(0, 1.18, 0);
-
-      const dolly = new THREE.Group();
-      dolly.position.set(0, 1.1, 0);
-      this.spiderDolly = dolly;
-
-      const stalk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.026, 0.028, 0.42, 8),
-        new THREE.MeshBasicMaterial({ color: 0xc5d4e8 }),
-      );
-      stalk.position.y = -0.1;
-
-      const hullMat = new THREE.MeshBasicMaterial({ color: 0x9ee7ff });
-      const hull = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.2, 0.26), hullMat);
-      hull.rotation.x = Math.PI / 2.85;
-      hull.rotation.z = Math.PI / 18;
-      hull.position.y = -0.36;
-
-      const podMat = new THREE.MeshBasicMaterial({ color: 0x00a8e8 });
-      const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 0.055, 14), podMat);
-      lens.rotation.z = Math.PI / 2;
-      lens.position.set(0.19, -0.34, 0.02);
-
-      const rimMat = new THREE.MeshBasicMaterial({ color: 0xffdd55 });
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.092, 0.018, 8, 22), rimMat);
-      rim.rotation.y = Math.PI / 2;
-      rim.position.set(0.21, -0.34, 0.02);
-
-      dolly.add(stalk, hull, lens, rim);
-
-      const legMat = new THREE.MeshBasicMaterial({ color: 0x9eb4d0 });
-      for (let i = 0; i < 4; i++) {
-        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.024, 0.48, 6), legMat);
-        const a = (i / 4) * Math.PI * 2;
-        leg.position.set(Math.cos(a) * 0.14, -0.68, Math.sin(a) * 0.14);
-        leg.rotation.x = Math.PI * 0.08;
-        leg.rotation.z = Math.cos(a) * 0.12;
-        dolly.add(leg);
+      const glbModel = bonusGLBAssets.getClone('spider');
+      if (glbModel) {
+        const dolly = new THREE.Group();
+        dolly.position.set(0, 1.1, 0);
+        dolly.add(glbModel);
+        this.spiderDolly = dolly;
+        this.core.scale.setScalar(0.76);
+        this.core.position.set(0, -0.3, 0);
+        this.aura.scale.setScalar(0.98);
+        this.aura.position.set(0, -0.18, 0);
+        dolly.add(this.core, this.aura);
+        this.propRoot.add(dolly);
+      } else {
+        this._buildProceduralSpider();
       }
-
-      this.core.scale.setScalar(0.76);
-      this.core.position.set(-0.035, -0.295, 0.065);
-      this.aura.scale.setScalar(0.98);
-      this.aura.position.set(0.03, -0.175, 0.11);
-      dolly.add(this.core, this.aura);
-
-      this.propRoot.add(cable, dolly);
       return;
     }
 
     if (this.propKind === 'rover') {
-      const bodyMat = new THREE.MeshBasicMaterial({ color: 0x7ebfff });
-      const chassis = new THREE.Mesh(
-        new THREE.BoxGeometry(0.62, 0.22, 0.48),
-        bodyMat,
-      );
-      chassis.position.y = 0.18;
-
-      const stripeMat = new THREE.MeshBasicMaterial({ color: 0xff8c42 });
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.055, 0.5), stripeMat);
-      stripe.position.set(0, 0.22, 0);
-
-      const wheelMatOuter = new THREE.MeshBasicMaterial({ color: 0x5d6f82 });
-      const wheelMatTire = new THREE.MeshBasicMaterial({ color: 0x22303d });
-
-      for (const xz of ([[-0.3, -0.2], [0.3, -0.2], [-0.3, 0.2], [0.3, 0.2]] as const)) {
-        const [ox, oz] = xz;
-        const tire = new THREE.Mesh(
-          new THREE.TorusGeometry(0.088, 0.028, 8, 16),
-          wheelMatOuter,
-        );
-        tire.rotation.y = Math.PI / 2;
-        tire.position.set(ox, 0.086, oz);
-        const hub = new THREE.Mesh(
-          new THREE.CircleGeometry(0.05, 10),
-          wheelMatTire,
-        );
-        hub.rotation.y = Math.PI / 2;
-        hub.position.set(ox > 0 ? ox + 0.02 : ox - 0.02, 0.086, oz);
-        this.roverWheels.push(tire);
-        this.propRoot.add(tire, hub);
+      const glbModel = bonusGLBAssets.getClone('rover');
+      if (glbModel) {
+        glbModel.traverse(o => {
+          if (o instanceof THREE.Mesh && o.name.toLowerCase().includes('wheel')) {
+            this.roverWheels.push(o);
+          }
+        });
+        this.core.scale.setScalar(1.02);
+        this.core.position.set(0.035, 0.33, -0.025);
+        this.aura.scale.setScalar(1.2);
+        this.aura.position.set(0.02, 0.495, 0.02);
+        this.propRoot.add(glbModel, this.core, this.aura);
+      } else {
+        this._buildProceduralRover();
       }
-
-      this.core.scale.setScalar(1.02);
-      this.core.position.set(0.035, 0.33, -0.025);
-      this.aura.scale.setScalar(1.2);
-      this.aura.position.set(0.02, 0.495, 0.02);
-
-      this.propRoot.add(stripe, chassis, this.core, this.aura);
       return;
     }
 
@@ -405,5 +348,99 @@ export class BonusObject3D {
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.021;
     this.propRoot.add(ring, paint);
+  }
+
+  private _buildProceduralSpider(): void {
+    const cableMat = new THREE.MeshBasicMaterial({ color: 0xe8eef7 });
+    const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.85, 8), cableMat);
+    cable.rotation.z = Math.PI / 2;
+    cable.position.set(0, 1.18, 0);
+
+    const dolly = new THREE.Group();
+    dolly.position.set(0, 1.1, 0);
+    this.spiderDolly = dolly;
+
+    const stalk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.026, 0.028, 0.42, 8),
+      new THREE.MeshBasicMaterial({ color: 0xc5d4e8 }),
+    );
+    stalk.position.y = -0.1;
+
+    const hullMat = new THREE.MeshBasicMaterial({ color: 0x9ee7ff });
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.2, 0.26), hullMat);
+    hull.rotation.x = Math.PI / 2.85;
+    hull.rotation.z = Math.PI / 18;
+    hull.position.y = -0.36;
+
+    const podMat = new THREE.MeshBasicMaterial({ color: 0x00a8e8 });
+    const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.075, 0.055, 14), podMat);
+    lens.rotation.z = Math.PI / 2;
+    lens.position.set(0.19, -0.34, 0.02);
+
+    const rimMat = new THREE.MeshBasicMaterial({ color: 0xffdd55 });
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.092, 0.018, 8, 22), rimMat);
+    rim.rotation.y = Math.PI / 2;
+    rim.position.set(0.21, -0.34, 0.02);
+
+    dolly.add(stalk, hull, lens, rim);
+
+    const legMat = new THREE.MeshBasicMaterial({ color: 0x9eb4d0 });
+    for (let i = 0; i < 4; i++) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.024, 0.48, 6), legMat);
+      const a = (i / 4) * Math.PI * 2;
+      leg.position.set(Math.cos(a) * 0.14, -0.68, Math.sin(a) * 0.14);
+      leg.rotation.x = Math.PI * 0.08;
+      leg.rotation.z = Math.cos(a) * 0.12;
+      dolly.add(leg);
+    }
+
+    this.core.scale.setScalar(0.76);
+    this.core.position.set(-0.035, -0.295, 0.065);
+    this.aura.scale.setScalar(0.98);
+    this.aura.position.set(0.03, -0.175, 0.11);
+    dolly.add(this.core, this.aura);
+
+    this.propRoot.add(cable, dolly);
+  }
+
+  private _buildProceduralRover(): void {
+    const bodyMat = new THREE.MeshBasicMaterial({ color: 0x7ebfff });
+    const chassis = new THREE.Mesh(
+      new THREE.BoxGeometry(0.62, 0.22, 0.48),
+      bodyMat,
+    );
+    chassis.position.y = 0.18;
+
+    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xff8c42 });
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.055, 0.5), stripeMat);
+    stripe.position.set(0, 0.22, 0);
+
+    const wheelMatOuter = new THREE.MeshBasicMaterial({ color: 0x5d6f82 });
+    const wheelMatTire = new THREE.MeshBasicMaterial({ color: 0x22303d });
+
+    for (const xz of ([[-0.3, -0.2], [0.3, -0.2], [-0.3, 0.2], [0.3, 0.2]] as const)) {
+      const [ox, oz] = xz;
+      const tire = new THREE.Mesh(
+        new THREE.TorusGeometry(0.088, 0.028, 8, 16),
+        wheelMatOuter,
+      );
+      tire.rotation.y = Math.PI / 2;
+      tire.position.set(ox, 0.086, oz);
+      const hub = new THREE.Mesh(
+        new THREE.CircleGeometry(0.05, 10),
+        wheelMatTire,
+      );
+      hub.rotation.y = Math.PI / 2;
+      hub.position.set(ox > 0 ? ox + 0.02 : ox - 0.02, 0.086, oz);
+      this.roverWheels.push(tire);
+      this.propRoot.add(tire, hub);
+    }
+
+    this.core.scale.setScalar(1.02);
+    this.core.position.set(0.035, 0.33, -0.025);
+    this.aura.scale.setScalar(1.2);
+    this.aura.position.set(0.02, 0.495, 0.02);
+
+    this.propRoot.add(stripe, chassis, this.core, this.aura);
   }
 }

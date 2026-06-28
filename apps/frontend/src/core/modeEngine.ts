@@ -95,7 +95,20 @@ export function generateDeliveries(
   });
 
   const ball = decoded.balls[0];
-  if (!ball) return { deliveries: [], telemetry: decoded.telemetry };
+  if (!ball) {
+    // Decomposer returned no balls (edge-case multiplier). Return a defend dot-ball
+    // so _activeBowlDelivery is never null and the engine has a valid outcome to animate.
+    return {
+      deliveries: [{
+        outcome: { kind: 'runs' as const, runs: 0 as CricketRuns, multiplier: 1 },
+        startMultiplier: 1,
+        endMultiplier: 1,
+        bowlerType: 'Fast' as BowlerType,
+        shotType: 'defend' as ShotType,
+      }],
+      telemetry: decoded.telemetry,
+    };
+  }
 
   const rng = mulberry32(seedFromString(`bowler:${betID}:${finalMultiplier.toFixed(6)}`));
 

@@ -4,7 +4,7 @@ import type { GameEventBus } from './GameEventBus.js';
 
 export interface InsuranceState {
   active: boolean;
-  /** Cost is 10× the current bet amount */
+  /** Cost is 10% of current bet amount (minimum 50) */
   cost: number;
   /** Whether insurance was triggered (used) this session */
   triggered: boolean;
@@ -30,7 +30,7 @@ export class InsuranceManager {
     this._betAmount = amount;
   }
 
-  get cost(): number { return this._betAmount * 10; }
+  get cost(): number { return Math.max(50, this._betAmount * 0.10); }
 
   getState(): InsuranceState {
     return {

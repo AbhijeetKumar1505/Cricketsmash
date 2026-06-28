@@ -107,8 +107,10 @@ export const game = $state({
   autobetStopAtMult: null as number | null,
   /** Balance captured at autobet start — used for cumulative loss/win comparison. */
   autobetStartBalance: 0,
-  /** Shorter gaps between result → next bowl when on. */
+  /** Shorter gaps between result → next bowl when on. Kept in sync with autobetSpeed. */
   turboPlay: false,
+  /** 0=Slow  1=Normal  2=Fast  3=Turbo — controls inter-round timing in autobet. */
+  autobetSpeed: 1 as 0 | 1 | 2 | 3,
   currentDeliveries: [] as Delivery[],
   canCashout: false,
   betActive: false,
@@ -151,7 +153,15 @@ export const game = $state({
   // ── Bonus Buy ─────────────────────────────────────────────────────────────
   bonusBuyAvailable: true,
   /** Minimum bet for bonus buy */
-  bonusBuyMinBet: 100,
+  bonusBuyMinBet: 15,
+  /** Minimum bet required to activate insurance */
+  insuranceMinBet: 20,
+  /** 30% surcharge deducted locally when bonus buy is initiated */
+  bonusBuyCost: 0,
+  /** Error message shown when bonus buy button is clicked but blocked */
+  bonusBuyAlert: null as string | null,
+  /** Per-round win toast shown above the bet panel after a scoring delivery */
+  winToast: null as null | { amount: number; multiplier: number; key: number },
 });
 
 // ── Internal state ──────────────────────────────────────────────────────────
@@ -160,6 +170,11 @@ let historyCounter = 0;
 let _tickets: StakeTicket[] = [];
 let _ticketCounter = 0;
 let _activeMainTicketId: number | null = null;
+let _skyHitThisDelivery = false;
+// Snapshot of the delivery the engine is currently animating — captured at
+// triggerBowl and cleared after onRoundEnd so callbacks always read the
+// right delivery even if game.currentDeliveries is overwritten by a concurrent bet.
+let _activeBowlDelivery: Delivery | null = null;
 
 function effectiveTicketMultiplier(
   displayMultiplier: number,
@@ -211,30 +226,35 @@ function syncAutobetFraming(): void {
   _bridge?.setAutobetFraming(game.autoPlayOn);
 }
 
-function interBallResultDelayMs(): number {
-  if (game.turboPlay) return 350;
-  if (game.autoPlayOn) return 400;
-  return 3500;
-}
-
-// Returns true when the current result warrants showing the scorecard overlay.
-// In normal play: always. In autobet: only on boundaries, sky hits, and milestone multipliers.
 function isNotableResult(): boolean {
-  if (!game.autoPlayOn) return true;
   const outcome = game.overSummary[0];
   if (!outcome) return false;
   if (outcome.kind === 'wicket') return true;
-  if (outcome.kind === 'runs' && outcome.runs >= 4) return true;  // boundary
-  const m = game.displayMultiplier;
-  // Milestone: 10×, 20×, 30×, … 100×
-  if (m >= 10 && Math.round(m / 10) * 10 === Math.round(m) && Math.round(m) % 10 === 0) return true;
+  if (outcome.kind === 'runs' && outcome.runs >= 4) return true;
+  if (_skyHitThisDelivery) return true;
   return false;
 }
 
+function interBallResultDelayMs(): number {
+  const notable = isNotableResult();
+  switch (game.autobetSpeed) {
+    case 0: return notable ? 4500 : 2000;   // slow — appreciate the result
+    case 1: return notable ? 3500 : 1200;   // normal (previous default)
+    case 2: return notable ? 1200 :  500;   // fast
+    case 3: return 300;                     // turbo
+    default: return notable ? 3500 : 1200;
+  }
+}
+
 function broadcastWaitMs(): number {
-  if (game.turboPlay) return 600;
-  if (game.autoPlayOn) return isNotableResult() ? 3200 : 700;
-  return 6500; // 6-7 seconds for normal play
+  const notable = isNotableResult();
+  switch (game.autobetSpeed) {
+    case 0: return notable ? 3600 : 1600;
+    case 1: return notable ? 3200 :  800;
+    case 2: return notable ? 1200 :  500;
+    case 3: return 350;
+    default: return notable ? 3200 : 800;
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -298,6 +318,7 @@ export async function swing(): Promise<void> {
 export async function placeBet(): Promise<void> {
   if (!client || game.betAmount <= 0) return;
   if (game.betActive) return;
+  game.betActive = true;  // lock before any await — prevents concurrent placeBet() calls
 
   recordMissionEvent({ kind: 'bet' });
 
@@ -348,10 +369,12 @@ export async function placeBet(): Promise<void> {
     game.entryMultiplier = 1;
     game.bonusProfitMultProduct = 1;
     game.sessionActive = true;
+    _skyHitThisDelivery = false;
     game.deliveryKey++;
     game.phase = 'animating';
 
     const delivery = newSeq[0];
+    _activeBowlDelivery = delivery ?? null;  // snapshot before triggerBowl; cleared in onRoundEnd
     _bridge?.triggerBowl(
       delivery ? makeEngineOutcome(delivery) : undefined,
       delivery ? { shotType: delivery.shotType } : undefined,
@@ -365,7 +388,6 @@ export async function placeBet(): Promise<void> {
       betId: betID,
     });
     _activeMainTicketId = mainTicket.id;
-    game.betActive = true;
     game.canCashout = false;  // enabled in onBowlStart — avoids leaking wicket outcome at bet time
     game.payoutMultiplier = result.payoutMultiplier;
 
@@ -373,6 +395,8 @@ export async function placeBet(): Promise<void> {
     console.error('[GameController] Bet failed:', err);
     game.errorMessage = err instanceof Error ? err.message : 'Bet failed';
     game.autoPlayOn = false;
+    game.betActive = false;  // release lock so user can retry after API failure
+    _activeBowlDelivery = null;
     syncAutobetFraming();
   }
 }
@@ -427,7 +451,7 @@ function setupBridgeCallbacks() {
 
       _bridge?.updateScoreboard(0, 1, game.displayMultiplier * game.bonusProfitMultProduct);
 
-      const delivery = game.currentDeliveries[0];
+      const delivery = _activeBowlDelivery;
       if (delivery?.outcome.kind !== 'wicket') {
         // Ball is released after 0.55s run-up, then travels for hitTime seconds.
       // CONTACT fires SWING_DUR (0.22s) after triggerSwing, so we schedule
@@ -449,7 +473,7 @@ function setupBridgeCallbacks() {
       if (!game.sessionActive) return;
       game.hitQuality = quality as typeof game.hitQuality;
 
-      const delivery = game.currentDeliveries[0];
+      const delivery = _activeBowlDelivery;
 
       if (quality !== 'miss') {
         game.visualPhase = 'hit';
@@ -486,7 +510,8 @@ function setupBridgeCallbacks() {
     },
 
     onRoundEnd: (_mult: number, _outcome: string) => {
-      const delivery = game.currentDeliveries[0];
+      const delivery = _activeBowlDelivery;
+      _activeBowlDelivery = null;  // clear snapshot — this delivery is now settled
 
       if (delivery) {
         game.overSummary = [delivery.outcome.kind === 'wicket'
@@ -503,12 +528,36 @@ function setupBridgeCallbacks() {
             multiplier: delivery.endMultiplier,
           });
         }
+      } else {
+        // Fallback: delivery snapshot was lost — infer outcome from engine params.
+        // This path should never occur after the modeEngine fallback fix, but guards
+        // against any future regression where _activeBowlDelivery could be null.
+        if (_outcome === 'wicket' || _mult === 0) {
+          game.overSummary = [{ kind: 'wicket' as const }];
+          game.displayMultiplier = 0;
+          recordMissionEvent({ kind: 'wicket' });
+        } else {
+          game.overSummary = [{ kind: 'runs' as const, runs: 0 }];
+          game.displayMultiplier = Math.max(1, _mult);
+          recordMissionEvent({ kind: 'hit', runs: 0, multiplier: game.displayMultiplier });
+        }
       }
 
       _bridge?.updateScoreboard(0, 1, game.displayMultiplier * game.bonusProfitMultProduct);
 
-      if (delivery?.outcome.kind !== 'wicket') {
+      const isWicket = delivery ? delivery.outcome.kind === 'wicket'
+        : (_outcome === 'wicket' || _mult === 0);
+      if (!isWicket) {
         game.visualPhase = 'celebrate';
+        // Show win amount toast above bet panel
+        if (delivery && delivery.outcome.kind === 'runs' && delivery.outcome.runs > 0) {
+          const winAmount = game.betAmount * delivery.endMultiplier;
+          const toastKey = Date.now();
+          game.winToast = { amount: winAmount, multiplier: delivery.endMultiplier, key: toastKey };
+          setTimeout(() => {
+            if (game.winToast?.key === toastKey) game.winToast = null;
+          }, 2800);
+        }
         setTimeout(advanceBall, interBallResultDelayMs());
       }
     },
@@ -518,6 +567,7 @@ function setupBridgeCallbacks() {
     },
 
     onSkyObjectHit: ({ type, multiplier }) => {
+      _skyHitThisDelivery = true;
       game.skyHitToast = { type, multiplier, key: Date.now() };
       game.activeSkyObject = null;
       setTimeout(() => {
@@ -572,7 +622,7 @@ async function handleSessionEnd(_finalMult: number) {
     return;
   }
 
-  const gapMs = game.turboPlay ? 420 : 780;
+  const gapMs = [900, 780, 400, 220][game.autobetSpeed] ?? 780;
   await new Promise((r) => setTimeout(r, gapMs));
   if (!game.autoPlayOn) return;
   if (game.betActive || game.sessionActive) return;
@@ -734,8 +784,12 @@ export function returnToIdle(): void {
   game.pendingRewardToast = null;
   game.bonusStreak = 0;
   game.bonusProfitMultProduct = 1;
+  game.bonusBuyCost = 0;
+  game.bonusBuyAlert = null;
+  game.winToast = null;
   game.activeSkyObject = null;
   game.skyHitToast = null;
+  _skyHitThisDelivery = false;
   game.lastSettledBetAmount = 0;
   game.lastSettledPayout = 0;
   game.lastSettledMultiplier = 0;
@@ -814,6 +868,11 @@ export function setAutoPlayConfig(cfg: {
 
 export function setTurboPlay(on: boolean): void {
   game.turboPlay = on;
+}
+
+export function setAutobetSpeed(level: 0 | 1 | 2 | 3): void {
+  game.autobetSpeed = level;
+  game.turboPlay = level === 3;
 }
 
 export function toggleTurboPlay(): void {
@@ -900,6 +959,12 @@ export async function placeBonusBuy(): Promise<void> {
   if (!client) return;
   if (game.betAmount < game.bonusBuyMinBet) return;
   if (game.betActive || game.sessionActive) return;
+
+  const surcharge = game.betAmount * 0.30;
+  if (game.balance < game.betAmount + surcharge) return;
+
+  game.bonusBuyCost = surcharge;
+  game.balance = Math.max(0, game.balance - surcharge);
 
   // Swap fielder to Kim Jong (lazy) — keep current batsman unchanged
   game.activeFielder = 'kimjong';

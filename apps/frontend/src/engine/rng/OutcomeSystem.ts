@@ -1,6 +1,7 @@
 import { HIT_TIMES } from '../constants.js';
 import type { BowlerType } from '../events/EventBus.js';
 import type { SkyObjectMeta } from '../sky/types.js';
+import type { PlayerProfile } from '../player/PlayerProfile.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -84,12 +85,26 @@ export class OutcomeSystem {
    * Client-side RNG for local/demo mode.
    * Not used in Stake or realtime modes.
    */
-  localRandom(): DeliveryOutcome {
+  localRandom(profile?: PlayerProfile): DeliveryOutcome {
     const types: BowlerType[] = ['fast', 'spin', 'swing'];
     const bowlerType          = types[Math.floor(Math.random() * 3)];
-    const isWicket            = Math.random() < 0.28;   // 28% wicket rate
-    const mult                = isWicket ? 0 : parseFloat((1.2 + Math.random() * 8).toFixed(2));
-    const bucket              = isWicket ? 'wicket' : this.bucketFromMultiplier(mult);
+
+    const weights = this.applyPlayerModifiers({
+      six:    0.05,
+      four:   0.07,
+      triple: 0.09,
+      double: 0.13,
+      single: 0.15,
+      dot:    0.20,
+      wicket: 0.15,
+    }, profile);
+
+    const bucket = this._sampleWeightedBucket(weights);
+    const isWicket = bucket === 'wicket';
+    const bucketMultipliers: Record<OutcomeBucket, number> = {
+      six: 4.5, four: 3.0, triple: 1.8, double: 1.5, single: 1.1, dot: 0.9, wicket: 0,
+    };
+    const mult = isWicket ? 0 : bucketMultipliers[bucket];
 
     return {
       result:           isWicket ? 'wicket' : 'hit',
@@ -98,6 +113,42 @@ export class OutcomeSystem {
       targetMultiplier: mult,
       bucket,
     };
+  }
+
+  /**
+   * Apply per-player stat modifiers to a set of bucket probability weights
+   * and renormalize so the total remains 1.0.
+   * Used in dev/local mode only — Stake server controls live outcomes.
+   */
+  applyPlayerModifiers(
+    weights: Record<OutcomeBucket, number>,
+    profile?: PlayerProfile,
+  ): Record<OutcomeBucket, number> {
+    if (!profile) return weights;
+    const s = profile.stats;
+    const scaled: Record<OutcomeBucket, number> = {
+      six:    weights.six    * s.powerIndex,
+      four:   weights.four   * s.powerIndex,
+      triple: weights.triple * s.runnerIndex,
+      double: weights.double * s.runnerIndex,
+      single: weights.single * s.runnerIndex,
+      dot:    weights.dot    * (1 / Math.max(s.powerIndex, 0.1)),
+      wicket: weights.wicket * (1 / Math.max(s.defenseIndex, 0.1)),
+    };
+    const total = Object.values(scaled).reduce((a, v) => a + v, 0);
+    const inv   = total > 0 ? 1 / total : 1;
+    for (const k of Object.keys(scaled) as OutcomeBucket[]) scaled[k] *= inv;
+    return scaled;
+  }
+
+  private _sampleWeightedBucket(weights: Record<OutcomeBucket, number>): OutcomeBucket {
+    let roll = Math.random();
+    const order: OutcomeBucket[] = ['six', 'four', 'triple', 'double', 'single', 'dot', 'wicket'];
+    for (const k of order) {
+      roll -= weights[k];
+      if (roll <= 0) return k;
+    }
+    return 'wicket';
   }
 
   bucketFromRuns(runs: number): OutcomeBucket {
@@ -126,10 +177,10 @@ export class OutcomeSystem {
   bucketFromMultiplier(multiplier: number): OutcomeBucket {
     if (!Number.isFinite(multiplier) || multiplier <= 0) return 'wicket';
     if (multiplier < 1.05) return 'dot';
-    if (multiplier < 1.35) return 'single';
-    if (multiplier < 1.75) return 'double';
-    if (multiplier < 2.25) return 'triple';
-    if (multiplier < 4.6) return 'four';
+    if (multiplier < 1.3)  return 'single';
+    if (multiplier < 1.65) return 'double';
+    if (multiplier < 2.4)  return 'triple';
+    if (multiplier < 3.75) return 'four';
     return 'six';
   }
 

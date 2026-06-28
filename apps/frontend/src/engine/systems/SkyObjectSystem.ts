@@ -26,6 +26,8 @@ export class SkyObjectSystem {
   private _impactPopElapsed = 0;
   private _glowFlash = 0;
   private _age = 0;
+  /** When true, drift animation stops so the ball can actually reach the locked position. */
+  private _frozen = false;
 
   spawn(type: SkyObjectType, ballId: number, rng: () => number): void {
     this.dispose();
@@ -41,13 +43,17 @@ export class SkyObjectSystem {
     this._impactPopElapsed = 0;
     this._glowFlash = 0;
     this._age = 0;
+    this._frozen = false;
   }
+
+  /** Call when the ball impulse has been aimed at this object — stops drift so ball actually hits it. */
+  freeze(): void { this._frozen = true; }
 
   update(dt: number): void {
     if (!this._id || this._phase === 'gone') return;
 
     this._age += dt;
-    if (this._phase === 'approaching' && this._type) {
+    if (!this._frozen && this._phase === 'approaching' && this._type) {
       // Keep sky objects clearly visible with predictable camera-relative motion.
       if (this._type === 'JETPACK') {
         this._pos.x = this._basePos.x + Math.sin(this._age * 1.8) * 0.8;
@@ -127,6 +133,7 @@ export class SkyObjectSystem {
     this._scale = 1;
     this._glowFlash = 0;
     this._age = 0;
+    this._frozen = false;
   }
 
   get snapshot(): SkyObjectSnapshot | null {

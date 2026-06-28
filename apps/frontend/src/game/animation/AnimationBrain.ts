@@ -29,6 +29,7 @@ import { BoneAccumulator } from './BoneAccumulator.js';
 import { BowlingController } from './BowlingController.js';
 import { BattingController } from './BattingController.js';
 import { FieldingController } from './FieldingController.js';
+import type { FieldingContext } from './FieldingController.js';
 import { AnimationFX, type FxFrameOutput } from './fxBus.js';
 import { updateHeadTracking } from './headTracking.js';
 import { applySprings } from './springs.js';
@@ -226,11 +227,16 @@ const LOCO_BONES = [
 // ROLE layer bones — arms/torso. Controllers use addRot (delta from bind pose)
 // after this base is written, making values rig-agnostic regardless of whether
 // the GLB was authored in Mixamo (near-zero bind) or Meshy AI (large bind angles).
-// neck is intentionally excluded from ROLE_BONES: its local axes on Meshy AI rigs
-// don't match expected conventions, so locking it to bind-pose Y causes visible
-// sideways tilt. Neck retains its natural resting value; only addRot swing deltas apply.
+// 'neck' MUST be here so it is reset to its captured bind every frame. It was
+// previously excluded (over a cosmetic bind-pose-tilt worry), but several
+// controllers + fxBus addRot small per-swing deltas to neck — with no reset those
+// compounded ~0.1–0.3 rad/delivery and drifted to >3.6 rad over a long autoplay,
+// collapsing the rig. Resetting to the AUTHORED bind value (not zero) keeps the
+// natural rest pose while making the swing deltas transient. (Found via the
+// rig-divergence watchdog: `window.__anim.rigMax()` → bone 'neck'.)
 const ROLE_BONES = [
   'spine','chest','upperChest',
+  'neck',
   'leftShoulder','rightShoulder',
   'leftArm','rightArm',
   'leftForeArm','rightForeArm',
@@ -328,6 +334,12 @@ export class AnimationBrain {
   private _batsmanBPos: BindPosMap = new Map();
   private readonly _fielderBPos: BindPosMap[] = [];
 
+  /** Per-fielder stance class (0=close 1=athletic 2=deep 3=lean) set by Renderer. */
+  private readonly _fielderStanceClasses: number[] = [];
+
+  /** Last seen hitQuality — used to detect wicket / boundary events for fielder reactions. */
+  private _lastFielderHitQuality: string = '';
+
   /** Running time — drives breathing / weight-shift sine waves. */
   private _t = 0;
 
@@ -336,6 +348,10 @@ export class AnimationBrain {
 
   /** Renderer reads this each frame and adds to mount.root.position.z. */
   batsmanRootZ = 0;
+
+  // Rig-divergence detector (autoplay collapse hunt)
+  private _rigFrame = 0;
+  private _rigDivergeLogged = false;
 
   // ── Bind / unbind ─────────────────────────────────────────────────────────
 
@@ -366,17 +382,26 @@ export class AnimationBrain {
     this.battingCtl.reset();
   }
 
-  setFielder(idx: number, b: CharacterBinding | null): void {
+  setFielder(idx: number, b: CharacterBinding | null, stanceClass = 1): void {
     if (!b) { this._fielders[idx] = null; delete this._fielderBPos[idx]; return; }
     this._fielderBPs[idx] = captureBP(b.instance);
     this._fielderBPos[idx] = captureBPos(b.instance);
+    this._fielderStanceClasses[idx] = stanceClass;
     const clipPlayer = new ClipPlayer(b.instance);
     this._fielders[idx] = { binding: b, clipPlayer };
     if (!this.fielderLayerSets[idx]) this.fielderLayerSets[idx] = new LayerSet();
     if (!this.fielderSprings[idx]) this.fielderSprings[idx] = new BoneAccumulator();
   }
 
-  clearFielders(): void { this._fielders.length = 0; this.fielderLayerSets.length = 0; this.fielderSprings.length = 0; this._fielderBPos.length = 0; }
+  clearFielders(): void {
+    this._fielders.length = 0;
+    this.fielderLayerSets.length = 0;
+    this.fielderSprings.length = 0;
+    this._fielderBPos.length = 0;
+    this._fielderStanceClasses.length = 0;
+    this._lastFielderHitQuality = '';
+    this.fieldingCtl.reset();
+  }
 
   // ── Per-frame update ──────────────────────────────────────────────────────
 
@@ -521,19 +546,28 @@ export class AnimationBrain {
 
   /** Release duration: lock decays over first 100ms of FOLLOW_THROUGH. */
   private static _LOCK_RELEASE = 0.100;
+  /** Ease-IN duration: ramp the freeze on over ~3 frames so contact doesn't snap. */
+  private static _LOCK_IN  = 0.045;
+  /** Peak lock — deliberately < 1 so secondary motion never fully dies (no stiffness). */
+  private static _LOCK_MAX = 0.82;
 
   /**
-   * Compute contact lock weight [0..1] from the batsman FSM state.
-   * 1 = fully frozen (CONTACT hold), 0 = free motion (idle/backlift/swing).
-   * Decays smoothly through the first 100ms of FOLLOW_THROUGH.
+   * Compute contact lock weight [0.._LOCK_MAX] from the batsman FSM state.
+   * Eases IN over the first ~45ms of CONTACT (smoothstep) instead of snapping to
+   * full freeze — that 0→1 single-frame jump read as a pop AND froze all secondary
+   * motion (stiff). Caps below 1 so springs/head retain a little life through impact.
+   * Decays back out over the first 100ms of FOLLOW_THROUGH.
    */
   private static _contactLockWeight(fsm: EngineSnapshot['batsmanFSM']): number {
-    if (fsm.phase === 'CONTACT') return 1;
+    if (fsm.phase === 'CONTACT') {
+      const inT = Math.min(1, fsm.elapsed / AnimationBrain._LOCK_IN);
+      const eased = inT * inT * (3 - 2 * inT);   // smoothstep ease-in
+      return AnimationBrain._LOCK_MAX * eased;
+    }
     if (fsm.phase === 'FOLLOW_THROUGH') {
       const releaseT = Math.min(1, fsm.elapsed / AnimationBrain._LOCK_RELEASE);
-      // Quadratic ease-out decay
       const t = 1 - releaseT;
-      return t * t;
+      return AnimationBrain._LOCK_MAX * t * t;     // quadratic ease-out decay
     }
     return 0;
   }
@@ -594,9 +628,10 @@ export class AnimationBrain {
       this.batsmanFx.consume(snap, dt);
       const { rootZ } = this.battingCtl.update(snap, dt, this.batsmanLayers.acc(LayerId.ROLE), personality);
       this.batsmanRootZ = rootZ;
-      // Scale down REACTION-layer FX recoil during lock so body doesn't
-      // jitter through the frozen impact frame
-      if (lockWeight < 1) {
+      // Suppress REACTION-layer FX recoil through the CONTACT hold so the impact
+      // reads as a clean pose, then let it play out across follow-through. Gated by
+      // phase (not lockWeight) so the softer lock cap can't leak recoil into contact.
+      if (snap.batsmanFSM.phase !== 'CONTACT') {
         this.batsmanFx.contributeBoneDeltas(this.batsmanLayers.acc(LayerId.REACTION));
       }
     } else {
@@ -650,7 +685,7 @@ export class AnimationBrain {
     if (this._lastContactId === -1) {
       this._lastContactId = cid;
     } else if (cid !== this._lastContactId) {
-      this._batContact.trigger(personality.power);
+      this._batContact.trigger(personality.power, snap.batsman.shotType);
       this._lastContactId = cid;
     }
 
@@ -670,11 +705,87 @@ export class AnimationBrain {
     }
 
     this.batsmanSpring.apply(b.instance);
+
+    // Two-handed grip post-pass: weld the left (top) hand to the bat AFTER the
+    // layer stack + springs have set this frame's pose, so the reach reads CURRENT
+    // world matrices (no one-frame lag) and the top hand stays on the fast-moving
+    // bat. Runs before the watchdog so a wild left-arm pose would still be caught.
+    if (ANIM_PROCEDURAL_ENABLED) {
+      // Right (bottom) hand first: nudges the bat off the body in the rest pose.
+      // Left weld reads the lifted bat afterward so both hands stay on the handle.
+      this._batTargetIK.solveRightGripPost(b.instance, snap);
+      this._batTargetIK.solveLeftGripPost(b.instance, snap);
+    }
+
+    // Rig-divergence watchdog: catch the autoplay collapse in the act + self-heal.
+    this._sanitizeRig(b.instance, this._batsmanBP);
+  }
+
+  /**
+   * Scan the batsman bones for non-finite or wildly-out-of-range local rotation.
+   * Logs the FIRST offending bone once per episode (with frame + contactId so we
+   * can correlate to a delivery), exposes a pollable `window.__anim.rigMax()`, and
+   * resets the offender to bind pose so the mesh can't actually collapse. No legit
+   * batting pose exceeds ~3.5 rad on any single component, so the thresholds below
+   * (warn 4.5, heal 6.0 / non-finite) won't fire on normal motion.
+   */
+  private _sanitizeRig(inst: CharacterInstance, bp: BindPose): void {
+    this._rigFrame++;
+    let worstBone = '';
+    let worstMag  = 0;
+    for (const [name, bone] of inst.bones) {
+      const { x, y, z } = bone.rotation;
+      const finite = Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)
+        && Number.isFinite(bone.position.x) && Number.isFinite(bone.position.y) && Number.isFinite(bone.position.z);
+      const mag = finite ? Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) : Infinity;
+      if (mag > worstMag) { worstMag = mag; worstBone = name; }
+
+      // Self-heal: snap non-finite / extreme bones back to bind (or identity).
+      if (!finite || mag > 6.0) {
+        const r = bp.get(name);
+        if (r) bone.rotation.set(r[0], r[1], r[2]); else bone.rotation.set(0, 0, 0);
+        if (!Number.isFinite(bone.position.x) || !Number.isFinite(bone.position.y) || !Number.isFinite(bone.position.z)) {
+          bone.position.set(0, 0, 0);
+        }
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      (window as any).__anim ??= {};
+      (window as any).__anim.rigMax = () => ({ bone: worstBone, mag: worstMag, frame: this._rigFrame });
+    }
+    if (worstMag > 4.5 && !this._rigDivergeLogged) {
+      this._rigDivergeLogged = true;
+      const info = { bone: worstBone, mag: Number.isFinite(worstMag) ? +worstMag.toFixed(3) : 'NaN/Inf',
+                     frame: this._rigFrame, contactId: this._lastContactId };
+      console.warn('[RIG-DIVERGE] first bone past sane bound:', info);
+      if (typeof window !== 'undefined') (window as any).__anim.rigDiverge = info;
+    }
   }
 
   private _updateFielders(snap: EngineSnapshot, dt: number, ballWorld: THREE.Vector3): void {
     // Fielders look toward batsman in idle staging mode
     const batsmanPos = (this._batsman?.binding.root.position as THREE.Vector3 | undefined) ?? ballWorld;
+
+    // ── Wicket / boundary event detection ─────────────────────────────────────
+    // hitQuality is set once per delivery at swing resolution and held until next.
+    // We detect the transition to drive fielder celebrate / react animations.
+    if (ANIM_PROCEDURAL_ENABLED) {
+      const hq = snap.feedback.hitQuality ?? '';
+      if (hq !== this._lastFielderHitQuality) {
+        if (hq === 'miss') {
+          this.fieldingCtl.triggerCelebrate();
+        } else if (hq === 'perfect' || hq === 'good') {
+          this.fieldingCtl.triggerReact();
+        }
+        this._lastFielderHitQuality = hq;
+      }
+    }
+
+    const fieldingCtx: FieldingContext = {
+      stanceClass: 1,                      // overridden per-fielder below
+      bowlerPhase: snap.bowlerFSM.phase,
+    };
 
     for (let i = 0; i < this._fielders.length; i++) {
       const bc = this._fielders[i];
@@ -708,13 +819,23 @@ export class AnimationBrain {
           if (bp && bpos) applyBPToLoco(bp, bpos, layerSet.acc(LayerId.LOCOMOTION));
         }
         if (bp) applyBPToRole(bp, layerSet.acc(LayerId.ROLE));
+
+        fieldingCtx.stanceClass = this._fielderStanceClasses[i] ?? 1;
         const fx = b.root.position.x;
         const fz = b.root.position.z;
-        this.fieldingCtl.update(i, snap, dt, layerSet.acc(LayerId.ROLE), fx, fz, ballWorld.x, ballWorld.z, personality);
+        this.fieldingCtl.update(
+          i, snap, dt, layerSet.acc(LayerId.ROLE),
+          fx, fz, ballWorld.x, ballWorld.z,
+          personality, fieldingCtx,
+        );
       }
 
-      const headTarget = ANIM_PROCEDURAL_ENABLED ? ballWorld : batsmanPos;
-      const headEnabled = ANIM_PROCEDURAL_ENABLED ? snap.ball.active : true;
+      // Head tracking: track ball during active flight, batsman otherwise.
+      // Ball.active = ball is in the air; without it fielders stare at ground origin.
+      const headTarget  = ANIM_PROCEDURAL_ENABLED
+        ? (snap.ball.active ? ballWorld : batsmanPos)
+        : batsmanPos;
+      const headEnabled = true;   // always track something — looks more alive than dead eyes
       const fbp = this._fielderBPs[i];
       if (fbp) applyBPToHead(fbp, layerSet.acc(LayerId.HEAD));
       updateHeadTracking(b.instance, b.root, headTarget, layerSet.acc(LayerId.HEAD), headEnabled);

@@ -68,6 +68,19 @@ function hitPersonalityFor(snap: EngineSnapshot): { personality: HitPersonality;
 const BLEND_DUR = 0.050; // 3 frames at 60fps
 type ArmBlend = [number, number, number];
 
+// Idle bat carry — four anatomical setters, dialed live by the user against the bat
+// close-up (never guessed; see feedback.md). The chosen values hold the bat down in
+// front of the body in a relaxed batting guard. Each was found via the dev slider
+// panel and is still console-tunable via the `window.__guard*` knobs below.
+//   SHOULDER = −rightArm.z     (up/down raise)
+//   ELBOW    =  rightForeArm.x (bend; negative extends the arm so the bat drops in front)
+//   WRIST    = −rightHand.z     (blade tilt)
+//   SWEEP    =  rightHand.y     (horizontal position around the vertical axis)
+const IDLE_RAISE_DEFAULT = 0.00;  // SHOULDER (window.__guardLift)
+const IDLE_ELBOW_DEFAULT = -1.50; // ELBOW    (window.__guardElbow)
+const IDLE_COCK_DEFAULT  = -1.50; // WRIST    (window.__guardCock)
+const IDLE_YAW_DEFAULT   = 0.00;  // SWEEP    (window.__guardYaw)
+
 export class BattingController {
   private _time = 0;
   private _triggerStepZ = 0;
@@ -162,8 +175,15 @@ export class BattingController {
         break;
 
       case 'BACKLIFT':
-        this._backlift(fsm.eased.backlift, acc, pers, heightDelta, snap.contactSolution ?? undefined);
         {
+          this._backlift(fsm.eased.backlift, acc, pers, heightDelta, snap.contactSolution ?? undefined, snap.batsman.shotType);
+          // Ease the idle raise+cock out across the backlift so the bat travels from
+          // the cocked ready pose into the backlift with no snap: entry (eased=0) =
+          // idle ready pose; eased=1 = pure backlift.
+          const idleOut = 1 - fsm.eased.backlift;
+          acc.addRot('rightArm',     0, 0, -this._idleRaise() * idleOut);
+          acc.addRot('rightForeArm', this._idleElbow() * idleOut, 0, 0);
+          acc.addRot('rightHand',    0, this._idleYaw() * idleOut, -this._idleCock() * idleOut);
           const triggerT = clamp((fsm.eased.backlift - 0.5) / 0.5, 0, 1);
           this._triggerStepZ = -0.20 * triggerT;
           rootZ = this._triggerStepZ;
@@ -173,7 +193,7 @@ export class BattingController {
       case 'SWING':
         {
           const swingT = clamp(fsm.progress, 0, 1);
-          this._swing(swingT, acc, pers);
+          this._swing(swingT, acc, pers, snap.batsman.shotType);
           // V6: anticipation hold — weight stays loaded during 80ms hold,
           // then drives forward through contact for readable momentum
           const heldT = clamp((swingT - 0.36) / 0.64, 0, 1);
@@ -185,7 +205,7 @@ export class BattingController {
       case 'CONTACT':
         {
           const hp = hitPersonalityFor(snap);
-          this._contact(acc, pers, hp.personality);
+          this._contact(acc, pers, hp.personality, snap.batsman.shotType);
           if (hp.personality === 'miss') rootZ = -0.10;
           else if (hp.personality === 'huge') rootZ = 0.25;
           else                           rootZ = 0.20;
@@ -284,54 +304,87 @@ export class BattingController {
     const c = pers.stanceCrouch;
     const w = pers.stanceWidth;
 
-    // Torso — pelvis-led forward lean. Hips use NEGATIVE X (forward hip hinge
-    // convention for this Meshy AI rig). Spine/chest use POSITIVE X (forward
-    // lean convention) — matching StagingController and GUARD_POSE. All staging
-    // controllers confirmed: negative X on hips = forward hip hinge; positive X
-    // on spine/chest = torso leans forward over the hips.
-    // Pelvis hinge reduced from -0.20 to -0.12 to stay near the -7° athletic
-    // target; combined with backlift's -0.05 this peaks at ~-10° maximum.
-    acc.addRot('hips',       0.02 * c, -0.01, 0.06);  // pelvis -6.9° — primary balance owner
-    acc.addRot('spine',       0.15,      0.02,  0);      // forward lean matches staging convention
-    acc.addRot('chest',       0.08,      0,     0);      // forward lean continues up the chain
-    acc.addRot('upperChest',  0.04,      0,     0);
-    acc.addRot('neck',        0,         0,     0);
-    acc.addRot('head',        0.10,      0,     0);
+    // Athletic guard crouch — moderate forward lean over the bat. Spine/chest use
+    // POSITIVE X (the forward-lean convention proven by the staging controllers and
+    // GUARD_POSE); kept moderate so total world rotation stays well under the
+    // "bowling lean" threshold. Hips take a tiny positive-X pelvis tilt to seat the
+    // lean over the support base rather than tipping the whole torso.
+    // NB: the CONTACT / FOLLOW_THROUGH code is tuned against a "+0.10 spine" and
+    // "+0.10 head" guard base (see the inline comments there); these values
+    // restore exactly that base so the phase poses land where they were tuned.
+    acc.addRot('hips',  0.03 * c, 0, 0);
+    acc.addRot('spine', 0.10, 0, 0);   // torso leans forward over the hips
+    acc.addRot('chest', 0.06, 0, 0);   // lean continues up the chain
+    acc.addRot('head',  0.10, 0, 0);   // chin stays down, eyes over the ball
 
-    // Shoulders: front closed, back open — resists the pelvis coil so the
-    // upper body stores rotational energy without visually spinning out.
-    acc.addRot('leftShoulder',  0, -0.03,  0.08);  // front shoulder closed
-    acc.addRot('rightShoulder', 0,  0.03, -0.08);  // back shoulder open
-
-    // Legs — deep crouch, wide base. Increased knee flex (+15%) so the legs
-    // visually preload with visible spring tension rather than standing upright.
-    acc.addRot('leftUpLeg',  -0.42 * c, 0,  0.12 * w);
-    acc.addRot('rightUpLeg', -0.42 * c, 0, -0.12 * w);
+    // Legs — knee bend + width. Slight forward shin pitch loads the stance.
+    acc.addRot('leftUpLeg',  -0.30 * c, 0,  0.10 * w);
+    acc.addRot('rightUpLeg', -0.30 * c, 0, -0.10 * w);
     acc.addRot('leftLeg',     0.12 * c, 0,  0);
     acc.addRot('rightLeg',    0.12 * c, 0,  0);
-    acc.addRot('leftFoot',    0,        0,  0.02);
-    acc.addRot('rightFoot',   0,        0, -0.02);
-
-    // Wrist pronation correction — seats bat handle naturally in the palm
-    acc.addRot('rightHand', 0, 0, -0.08);
   }
 
-  // ── IDLE arm guard — cricket bat-holding stance during idle only ───────────
-  // addRot layers cleanly on top of the walk-clip arm base (which is upright
-  // while the clip runs). Batting phases override arms via their own setRot.
-  // heightDelta > 0 = ball is above standard height → raise arm guard slightly.
-  private _idleArmGuard(acc: BoneAccumulator, pers: Personality, heightDelta = 0): void {
-    const p = pers.power;
-    // Pre-set arm height based on ball Y — visible anticipation of incoming height
-    const armHeightAdj = heightDelta * 0.20;
-    acc.addRot('rightShoulder',  0.05, 0,  0);
-    acc.addRot('rightArm',      (-0.18 + armHeightAdj) * p, 0, -0.22 * p);
-    acc.addRot('rightForeArm',   0.25,     0,  0);
-    acc.addRot('rightHand',      0.04,     0, -0.08);
-    acc.addRot('leftShoulder',   0.05, 0,  0);
-    acc.addRot('leftArm',       (-0.15 + armHeightAdj * 0.5) * p, 0,  0.20 * p);
-    acc.addRot('leftForeArm',    0.20,     0,  0);
-    acc.addRot('leftHand',       0.04,     0,  0.06);
+  // ── IDLE arm guard — two-handed grip base pose ───────────────────────────
+  // The RIGHT hand holds the bat (parented in the Renderer); the LEFT (top) hand
+  // is welded onto the handle by BatTargetIK.solveLeftGripPost(). That weld uses
+  // an analytic reach that CLAMPS to the arm's max length — so if the left arm
+  // rests at its bind pose (~106° out to the side on this Meshy rig) the handle
+  // is beyond reach and the hand lands short → reads as "only one hand on the bat".
+  //
+  // Fix: bring the left arm across toward the handle here so the weld only has a
+  // few cm to fine-correct. Values reuse the LEFT-arm axes already proven by
+  // _backlift (its lift=0 rest deltas) — NOT fresh axis guesses, which feedback.md
+  // records as always wrong on this rig — and double as a smooth IDLE→BACKLIFT
+  // hand-off (no left-arm pose snap on phase entry).
+  /** Idle bat-raise magnitude (radians; applied as −rightArm.z), via `window.__guardLift`. */
+  private _idleRaise(): number {
+    const ov = (typeof window !== 'undefined' && typeof (window as { __guardLift?: number }).__guardLift === 'number')
+      ? (window as { __guardLift?: number }).__guardLift as number
+      : IDLE_RAISE_DEFAULT;
+    return clamp(ov, 0, 2.5);
+  }
+
+  /** Idle bat-cock magnitude (radians; applied as −rightHand.z), via `window.__guardCock`. */
+  private _idleCock(): number {
+    const ov = (typeof window !== 'undefined' && typeof (window as { __guardCock?: number }).__guardCock === 'number')
+      ? (window as { __guardCock?: number }).__guardCock as number
+      : IDLE_COCK_DEFAULT;
+    return clamp(ov, 0, 2.5);
+  }
+
+  /** Idle elbow bend (radians, rightForeArm.x), via `window.__guardElbow`. */
+  private _idleElbow(): number {
+    const ov = (typeof window !== 'undefined' && typeof (window as { __guardElbow?: number }).__guardElbow === 'number')
+      ? (window as { __guardElbow?: number }).__guardElbow as number
+      : IDLE_ELBOW_DEFAULT;
+    return clamp(ov, -1.5, 1.5);
+  }
+
+  /** Idle sweep around the vertical/head axis (radians, rightHand.y), via `window.__guardYaw`. */
+  private _idleYaw(): number {
+    const ov = (typeof window !== 'undefined' && typeof (window as { __guardYaw?: number }).__guardYaw === 'number')
+      ? (window as { __guardYaw?: number }).__guardYaw as number
+      : IDLE_YAW_DEFAULT;
+    return clamp(ov, -1.5, 1.5);
+  }
+
+  private _idleArmGuard(acc: BoneAccumulator, _pers: Personality, _heightDelta = 0): void {
+    // RIGHT arm holds the bat (parented to rightHand in the Renderer); at bind pose
+    // this Meshy rig's arm hangs ~106° out to the side, so an un-posed bat dangles
+    // at the feet. Start from the PROVEN flat rest deltas (the _backlift lift=0 base,
+    // which keeps the LEFT hand reachable for solveLeftGripPost's weld) …
+    acc.addRot('rightArm',     -0.32, 0, -0.58);
+    acc.addRot('rightForeArm',  0.58, 0, -0.24);
+    acc.addRot('rightHand',     0.06, 0, -0.16);
+    acc.addRot('leftArm',      -0.28, 0,  0.68);
+    acc.addRot('leftForeArm',   0.52, 0,  0.20);
+    // … then RAISE the arm up-and-to-the-off-side and COCK the bat up at the wrist
+    // so the blade points up at ~45° (matching the user's reference). Both axes were
+    // found empirically against the bat close-up (feedback.md: never guess on this
+    // rig). The LEFT hand follows automatically — welded by solveLeftGripPost.
+    acc.addRot('rightArm',     0, 0, -this._idleRaise());        // SHOULDER up/down
+    acc.addRot('rightForeArm', this._idleElbow(), 0, 0);         // ELBOW bend
+    acc.addRot('rightHand',    0, this._idleYaw(), -this._idleCock());  // SWEEP + WRIST
   }
 
   // ── IDLE — guard stance + breathing sway ──────────────────────────────────
@@ -358,6 +411,7 @@ export class BattingController {
     pers:        Personality,
     heightDelta = 0,
     cs?:         { requiredSwingDuration: number },
+    shotType?:   string,
   ): void {
     const lift  = easeOutQuad(e);
     const reach = pers.backliftHeight;
@@ -426,6 +480,26 @@ export class BattingController {
       // Spine preload — tiny extra coil release tension
       acc.addRot('spine', 0, -0.04 * ant, 0);
     }
+
+    // ── Shot-type body pre-set — subtly pre-positions for the incoming shot ──
+    if (shotType === 'pull') {
+      acc.addRot('rightArm',  0.20 * e, 0, 0);
+      acc.addRot('spine',    -0.12 * e, 0, 0);
+      acc.addRot('hips',      0, 0, -0.08 * e);
+    } else if (shotType === 'loft') {
+      acc.addRot('rightArm',  0.35 * e, 0, 0);
+      acc.addRot('spine',    -0.18 * e, 0, 0);
+      acc.addRot('chest',     0.10 * e, 0, 0);
+    } else if (shotType === 'cut') {
+      acc.addRot('head',      0, 0, 0.12 * e);
+      acc.addRot('rightArm',  0, 0, 0.15 * e);
+    } else if (shotType === 'drive') {
+      acc.addRot('spine',     0.08 * e, 0, 0);
+      acc.addRot('rightArm',  0.12 * e, 0, 0);
+    } else if (shotType === 'defend') {
+      acc.addRot('rightArm',     -0.20 * e, 0, 0);
+      acc.addRot('rightForeArm',  0.15 * e, 0, 0);
+    }
   }
 
   // ── Phase 3: SWING — kinetic chain hips→spine→chest→shoulder→elbow→wrist ──
@@ -436,7 +510,7 @@ export class BattingController {
     return clamp((t - lead) / (1 - lead), 0, 1);
   }
 
-  private _swing(linearT: number, acc: BoneAccumulator, pers: Personality): void {
+  private _swing(linearT: number, acc: BoneAccumulator, pers: Personality, shotType?: string): void {
     // Anticipation hold — first 12% of swing shows minimal movement (a beat),
     // then the full chain unfolds. 12% keeps the "stillness" tell without
     // wasting time-warped window on fast deliveries (was 36% = 126ms wasted
@@ -524,6 +598,21 @@ export class BattingController {
     // Head tracks shot direction — connected to spine rotation so head
     // follows torso naturally rather than tracking independently
     acc.addRot('head', 0.12, HUGE_HIT_HEAD_Y * spineE, 0);
+
+    // ── Shot-type swing bias ──────────────────────────────────────────────
+    if (shotType === 'pull') {
+      acc.addRot('hips',  0, 0.15 * linearT, 0);
+      acc.addRot('chest', 0, 0.12 * linearT, 0);
+    } else if (shotType === 'cut') {
+      acc.addRot('rightForeArm', 0.15 * linearT, 0, 0);
+      acc.addRot('hips', 0, 0.08 * linearT, 0);
+    } else if (shotType === 'loft') {
+      acc.addRot('rightArm', 0.12 * linearT, 0, 0);
+      acc.addRot('spine',   -0.10 * linearT, 0, 0);
+    } else if (shotType === 'defend') {
+      acc.addRot('rightArm', -0.18 * linearT, 0, 0);
+      acc.addRot('chest',     0, -0.10 * linearT, 0);
+    }
   }
 
   // ── Phase 4: CONTACT — sync frame (FX bus also fires here) ────────────────
@@ -533,7 +622,7 @@ export class BattingController {
   // V4: torso values MATCH the _swing end state (t=1.0) so contact is a
   // continuation of the kinetic chain, not a separate pose. Added front leg
   // brace + rear heel lift so the viewer sees force transfer at impact.
-  private _contact(acc: BoneAccumulator, pers: Personality, personality: HitPersonality): void {
+  private _contact(acc: BoneAccumulator, pers: Personality, personality: HitPersonality, shotType?: string): void {
     const totalRot = MAX_SWING_RAD * pers.hipRotation;
     const p        = pers.power;
 
@@ -554,7 +643,7 @@ export class BattingController {
         acc.addRot('leftArm',      -0.40 * p, 0,  0.70 * p);
         acc.addRot('leftForeArm',   0.52 + 0.35, 0, 0.20);
         acc.addRot('head', 0.20, 0, 0);
-        return;
+        break;
       }
 
       // ── DOT / SMALL: short compact finish, minimal torso rotation ──────────
@@ -572,7 +661,7 @@ export class BattingController {
         acc.addRot('leftArm',      -0.55 * p, 0,  0.90 * p);
         acc.addRot('leftForeArm',   0.52 + 0.35, 0, 0.20);
         acc.addRot('head', 0.10, 0.15, 0);
-        return;
+        break;
       }
 
       // ── BIG: full extension, clear torso rotation ──────────────────────────
@@ -593,7 +682,7 @@ export class BattingController {
         acc.addRot('leftArm',      -0.68 * p, 0,  1.20 * p);
         acc.addRot('leftForeArm',   0.52 + 0.35, 0, 0.20);
         acc.addRot('head', 0.10, 0.25, 0);
-        return;
+        break;
       }
 
       // ── HUGE: maximum extension, head already tilting up to track ball ─────
@@ -614,8 +703,23 @@ export class BattingController {
         acc.addRot('leftArm',      -0.68 * p, 0,  1.30 * p);
         acc.addRot('leftForeArm',   0.52 + 0.35, 0, 0.20);
         acc.addRot('head', -0.08, HUGE_HIT_HEAD_Y, 0);
-        return;
+        break;
       }
+    }
+
+    // ── Shot-type contact pose overlays ──────────────────────────────────────
+    if (shotType === 'pull') {
+      acc.addRot('rightArm', 0, 0,  0.20);
+      acc.addRot('chest',    0, 0,  0.12);
+    } else if (shotType === 'cut') {
+      acc.addRot('head',         0, 0,  0.10);
+      acc.addRot('rightForeArm', 0.08, 0, 0);
+    } else if (shotType === 'loft') {
+      acc.addRot('rightArm', 0.15, 0, 0);
+      acc.addRot('spine',   -0.12, 0, 0);
+    } else if (shotType === 'defend') {
+      acc.addRot('rightForeArm', 0, 0, -0.15);
+      acc.addRot('rightHand',    0, 0, -0.10);
     }
   }
 
@@ -653,8 +757,11 @@ export class BattingController {
         acc.addRot('rightHand',     0.06 - SWING_WRIST_SNAP, 0, -0.16);
         acc.addRot('leftArm',      -0.40 * p, 0,  0.70 * p);
         acc.addRot('leftForeArm',   0.52 + 0.35, 0, 0.20);
-        acc.addRot('head', 0.30, 0, 0);
-        return;
+        // Head-down dejection — but only a small ADD on top of the guard stance's
+        // forward lean (+0.10 head + spine/chest). The old +0.30 stacked to ~40°
+        // cumulative and tucked the head into the chest.
+        acc.addRot('head', 0.10, 0, 0);
+        break;
       }
 
       // ── DOT/SMALL: compact finish, minimal torso, arms pull in ────────────
@@ -671,8 +778,10 @@ export class BattingController {
         acc.addRot('rightHand',     0.06 - SWING_WRIST_SNAP + 0.12 * fte * scale, 0, -0.30);
         acc.addRot('leftArm',      -0.55 * p - 0.30 * fte * scale, 0,  0.90 * p);
         acc.addRot('leftForeArm',   0.52 + 0.35 - 0.18 * fte * scale, 0, 0.20);
-        acc.addRot('head', 0.15 + 0.15 * fte * scale, 0.15 * fte * scale, 0);
-        return;
+        // Reduced from 0.15 + 0.15·fte — stacked on the guard lean it folded the
+        // head toward the chest. Keep a gentle look-down at the played ball.
+        acc.addRot('head', 0.06 + 0.08 * fte * scale, 0.15 * fte * scale, 0);
+        break;
       }
 
       // ── BIG: full extension, torso rotation, bat wraps ────────────────────
@@ -693,7 +802,7 @@ export class BattingController {
         acc.addRot('leftForeArm',   0.52 + 0.35 - 0.28 * fte * scale, 0, 0.20);
         acc.addRot('rightFoot', 0, 0, 0.12 * fte * scale);
         acc.addRot('head', (0.15 + 0.22 * fte * scale) - 0.30 * fte * scale, HUGE_HIT_HEAD_Y * fte * scale * 0.6, 0);
-        return;
+        break;
       }
 
       // ── HUGE: massive wraparound, maximum rotation, watch ball into sky ────
@@ -714,23 +823,36 @@ export class BattingController {
         acc.addRot('leftForeArm',   0.52 + 0.35 - 0.45 * fte * scale, 0, 0.20);
         acc.addRot('rightFoot', 0.08 * fte * scale, 0, 0.22 * fte * scale);
         acc.addRot('head', (0.20 + 0.35 * fte * scale) - 0.70 * fte * scale, HUGE_HIT_HEAD_Y * fte * scale, 0);
-        return;
+        break;
       }
     }
 
     // ── Shot-type arc modifiers — additive overlays on the base outcome profile ──
-    // Applied after the switch so they stack on any personality without replacing it.
-
-    if (shotType === 'pull' || shotType === 'cut') {
-      // Horizontal sweep arc: arm wraps across the body, chest opens laterally,
-      // head tilts to follow the trajectory toward leg side.
-      acc.addRot('rightArm',  0, 0,  0.35 * e);   // arm sweeps across body
-      acc.addRot('chest',     0, 0,  0.15 * e);   // chest opens laterally
-      acc.addRot('head',      0, 0,  0.12 * e);   // head tilts with arc
+    if (shotType === 'pull') {
+      acc.addRot('rightArm', 0, 0,  0.35 * e);
+      acc.addRot('chest',    0, 0,  0.15 * e);
+      acc.addRot('head',     0, -0.12 * e, 0);   // head turns toward leg side
+    } else if (shotType === 'cut') {
+      acc.addRot('rightArm', 0, 0,  0.35 * e);
+      acc.addRot('chest',    0, 0,  0.15 * e);
+      acc.addRot('head',     0,  0.12 * e, 0);   // head turns toward off side
+    } else if (shotType === 'drive') {
+      acc.addRot('rightArm', 0, 0, -0.20 * e);
+      acc.addRot('chest',    0, 0, -0.10 * e);
+    } else if (shotType === 'loft') {
+      acc.addRot('rightArm', 0.25 * e, 0, 0);
+      acc.addRot('head',     0.15 * e, 0, 0);    // head tilts up tracking ball
+      acc.addRot('chest',   -0.12 * e, 0, 0);
+    } else if (shotType === 'quick_single' || shotType === 'pushed_two' || shotType === 'run_three') {
+      acc.addRot('rightArm',     0, 0,  0.12 * e);
+      acc.addRot('rightForeArm', 0, 0, -0.10 * e);
+    } else if (shotType === 'miss' || shotType === 'bowled') {
+      acc.addRot('rightArm', 0, 0,  0.22 * e);
+      acc.addRot('head',     0, -0.15 * e, 0);
+      acc.addRot('spine',    0.10 * e, 0, 0);
     } else if (shotType === 'defend') {
-      // Compact recovery: arms pull in quickly, elbow tucks, minimal extension.
-      acc.addRot('rightArm',     0, 0,  0.28 * e);  // arm draws back in
-      acc.addRot('rightForeArm', 0, 0, -0.18 * e);  // elbow tucks toward body
+      acc.addRot('rightArm',     0, 0,  0.28 * e);
+      acc.addRot('rightForeArm', 0, 0, -0.18 * e);
     }
   }
 
