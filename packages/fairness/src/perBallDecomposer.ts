@@ -15,6 +15,7 @@ import {
   STREAK_OVERRIDE_MULTIPLIERS,
   multiplierForSkyType,
   outcomeRuns,
+  runsFromMultiplier,
   pickWeighted,
   profileForMode,
   profileForPositivePayout,
@@ -230,12 +231,21 @@ function decomposePowerplay(
   const capClamped = factor >= CAP_SINGLE_BALL_MULTIPLIER - 1e-6;
   if (capClamped) telemetry.push({ kind: 'cap_clamped', payload: { ball: 0, factor } });
 
-  const runs = outcomeRuns(pick.key === 'catch_out' ? 'six' : pick.key) as CricketRuns;
+  // If reconciliation knocked the factor below the sky multiplier, the sky bonus did
+  // not actually land at its value — drop the visual so we never show a plane/jetpack
+  // that pays a dot. (Common when Stake's payout is lower than the rolled sky multiplier.)
+  if (skyType && factor < multiplierForSkyType(skyType) - DECOMPOSE_EPSILON) {
+    skyType = undefined;
+  }
+
+  // Runs visualise the FINAL factor (after sky override + reconciliation), not the
+  // originally-sampled key — otherwise the 3D shot diverges from the paid multiplier.
+  const runs = runsFromMultiplier(factor) as CricketRuns;
   const ball: DecomposedBall = {
     index: 0,
     key: pick.key,
     factor,
-    runs: skyType ? (6 as CricketRuns) : runs,
+    runs,
     skyType,
     flags: {
       skyOverride: !!skyType,
@@ -374,15 +384,23 @@ function decomposePositiveOver(
   const fac = [...factors];
   const rec = reconcileProduct(fac, targetMult, adjustIdx, telemetry);
 
+  // Drop the sky visual if reconciliation pulled the sky ball's factor below its sky
+  // multiplier — never show a plane/jetpack that doesn't pay its value.
+  const skyHeld = skyType !== undefined
+    && skyBallIdx >= 0
+    && fac[skyBallIdx]! >= multiplierForSkyType(skyType) - DECOMPOSE_EPSILON;
+
   const balls: DecomposedBall[] = keys.map((key, i) => ({
     index: i,
     key,
     factor: fac[i]!,
-    runs: outcomeRuns(key) as CricketRuns,
-    skyType: i === skyBallIdx ? skyType : undefined,
+    // Runs reflect each ball's FINAL reconciled factor (sky/streak/reconcile included),
+    // so the visualised shot always matches what that ball actually paid.
+    runs: runsFromMultiplier(fac[i]!) as CricketRuns,
+    skyType: skyHeld && i === skyBallIdx ? skyType : undefined,
     streakLength: i === streakOverrideIdx ? streakLenAtApply : undefined,
     flags: {
-      skyOverride: i === skyBallIdx,
+      skyOverride: skyHeld && i === skyBallIdx,
       streakOverride: i === streakOverrideIdx,
       residualAdjusted: Math.abs(rec.product - targetMult) < DECOMPOSE_EPSILON * 100,
       capClamped: fac[i]! >= CAP_SINGLE_BALL_MULTIPLIER - 1e-6,

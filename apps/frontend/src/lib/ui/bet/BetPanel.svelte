@@ -116,13 +116,11 @@
   const canBonusBuy = $derived(
     game.bonusBuyAvailable &&
     !game.betActive && !game.sessionActive &&
-    game.betAmount >= (game.bonusBuyMinBet ?? 0) &&
     game.balance >= game.betAmount + bonusBuySurcharge
   );
-  const insuranceCost = $derived(Math.max(20, game.betAmount * 0.10));
+  const insuranceCost = $derived(game.betAmount * 0.10);
   const canInsurance = $derived(
     !game.betActive && !game.sessionActive &&
-    game.betAmount >= (game.insuranceMinBet ?? 0) &&
     game.balance >= insuranceCost
   );
 
@@ -145,11 +143,6 @@
       scheduleBonusAlertClear();
       return;
     }
-    if (game.betAmount < (game.bonusBuyMinBet ?? 0)) {
-      game.bonusBuyAlert = `Min bet ${currSymbol}${(game.bonusBuyMinBet ?? 0).toFixed(currDecimals)}`;
-      scheduleBonusAlertClear();
-      return;
-    }
     if (game.balance < game.betAmount + bonusBuySurcharge) {
       game.bonusBuyAlert = 'Insufficient balance';
       scheduleBonusAlertClear();
@@ -166,11 +159,6 @@
       return;
     }
     if (game.betActive || game.sessionActive) return;
-    if (game.betAmount < (game.insuranceMinBet ?? 0)) {
-      insAlert = `Min bet ${currSymbol}${(game.insuranceMinBet ?? 0).toFixed(currDecimals)}`;
-      scheduleInsAlertClear();
-      return;
-    }
     if (game.balance < insuranceCost) {
       insAlert = 'Insufficient balance';
       scheduleInsAlertClear();

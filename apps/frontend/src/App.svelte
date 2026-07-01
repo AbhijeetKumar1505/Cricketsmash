@@ -23,7 +23,7 @@
     try {
       await initGame();
       await new Promise(r => setTimeout(r, 1500));
-      navigateTo('welcome');
+      navigateTo('gameplay');
     } catch (err) {
       console.error('Boot failed:', err);
     }

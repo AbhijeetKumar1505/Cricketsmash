@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/addons/utils/SkeletonUtils.js';
+import { createGlbLoader } from '../render/glbLoader.js';
 
 // ── Rigged character manifest ─────────────────────────────────────────────────
 // Each entry lists the base GLB (Walking — provides mesh + skeleton + walk clip)
@@ -70,7 +70,7 @@ export interface CharacterInstance {
 
 // ── GLTF cache (load-once) ────────────────────────────────────────────────────
 
-const _loader  = new GLTFLoader();
+const _loader  = createGlbLoader();
 const _cache   = new Map<string, GLTF>();        // url → loaded GLTF
 const _inflight = new Map<string, Promise<void>>(); // url → pending load
 

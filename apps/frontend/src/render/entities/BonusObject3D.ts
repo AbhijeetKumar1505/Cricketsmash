@@ -100,6 +100,8 @@ export class BonusObject3D {
 
   private spiderDolly: THREE.Group | null = null;
   private roverWheels: THREE.Mesh[] = [];
+  /** True once the real GLB model was used; false while showing the procedural placeholder. */
+  private _builtWithGLB = false;
 
   /** Broadcast camera-ish eye position for billboard aura (see `render/Camera.ts`). */
   private static readonly _CAM_LOOK = new THREE.Vector3(0, 3.72, 10);
@@ -159,6 +161,16 @@ export class BonusObject3D {
       this.root.add(this.core, this.aura);
     }
     this.root.position.set(snap.x, snap.y, snap.z);
+  }
+
+  /** The BonusGLBAssets key this prop renders from, or null for purely procedural props. */
+  get glbKey(): 'rover' | 'spider' | null {
+    return this.propKind === 'rover' ? 'rover' : this.propKind === 'spider' ? 'spider' : null;
+  }
+
+  /** True when this prop is showing the procedural placeholder but a real GLB exists for it. */
+  get needsGlbUpgrade(): boolean {
+    return this.glbKey !== null && !this._builtWithGLB;
   }
 
   update(time: number, dt: number, activeHit: boolean, snap: BonusSnapshot): void {
@@ -304,6 +316,7 @@ export class BonusObject3D {
     if (this.propKind === 'spider') {
       const glbModel = bonusGLBAssets.getClone('spider');
       if (glbModel) {
+        this._builtWithGLB = true;
         const dolly = new THREE.Group();
         dolly.position.set(0, 1.1, 0);
         dolly.add(glbModel);
@@ -323,6 +336,7 @@ export class BonusObject3D {
     if (this.propKind === 'rover') {
       const glbModel = bonusGLBAssets.getClone('rover');
       if (glbModel) {
+        this._builtWithGLB = true;
         glbModel.traverse(o => {
           if (o instanceof THREE.Mesh && o.name.toLowerCase().includes('wheel')) {
             this.roverWheels.push(o);

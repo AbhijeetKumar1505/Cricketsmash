@@ -152,10 +152,6 @@ export const game = $state({
 
   // ── Bonus Buy ─────────────────────────────────────────────────────────────
   bonusBuyAvailable: true,
-  /** Minimum bet for bonus buy */
-  bonusBuyMinBet: 15,
-  /** Minimum bet required to activate insurance */
-  insuranceMinBet: 20,
   /** 30% surcharge deducted locally when bonus buy is initiated */
   bonusBuyCost: 0,
   /** Error message shown when bonus buy button is clicked but blocked */
@@ -957,7 +953,6 @@ export function deactivateInsurance(): void {
 
 export async function placeBonusBuy(): Promise<void> {
   if (!client) return;
-  if (game.betAmount < game.bonusBuyMinBet) return;
   if (game.betActive || game.sessionActive) return;
 
   const surcharge = game.betAmount * 0.30;

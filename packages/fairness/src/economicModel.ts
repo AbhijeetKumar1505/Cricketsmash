@@ -135,6 +135,28 @@ export function outcomeRuns(key: MathOutcomeKey): 0 | 1 | 2 | 3 | 4 | 6 {
   return 0;
 }
 
+/**
+ * Map a final per-ball factor (the actual multiplier applied after overrides +
+ * reconciliation) back to the cricket runs that should be VISUALISED for it.
+ *
+ * The visual shot must reflect the payout, not the originally-sampled outcome key:
+ * after reconciliation a ball's factor is adjusted to hit the Stake target, while
+ * its sampled key is unchanged. Deriving runs from the key (the old behaviour) lets
+ * the 3D shot diverge from the multiplier (e.g. a "six" animation paying ~0.9×).
+ *
+ * Thresholds mirror `OutcomeSystem.bucketFromMultiplier` in the frontend engine and
+ * map the standard outcome multipliers (0.9/1.1/1.5/1.8/3.0/4.5) onto their own buckets.
+ */
+export function runsFromMultiplier(factor: number): 0 | 1 | 2 | 3 | 4 | 6 {
+  if (!Number.isFinite(factor) || factor <= 0) return 0;
+  if (factor < 1.05) return 0;
+  if (factor < 1.3) return 1;
+  if (factor < 1.65) return 2;
+  if (factor < 2.4) return 3;
+  if (factor < 3.75) return 4;
+  return 6;
+}
+
 const SKY_TYPE_WEIGHTS: Record<SkyObjectType, number> = {
   JETPACK: 0.75,
   SMALL_PLANE: 0.22,

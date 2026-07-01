@@ -137,8 +137,6 @@ export class Renderer implements Renderable {
   private readonly impactJuice = new ImpactJuice();
   private readonly contactSpark = new ContactSpark();
   private readonly bonusMeshes = new Map<string, BonusObject3D>();
-  /** Set to true once bonusGLBAssets.preload() resolves; syncBonusObjects waits for this. */
-  private _bonusGLBsReady = false;
   private _lastBonusHitId: string | null = null;
   private skyMesh: SkyObject3D | null = null;
   private _lastSkyId: string | null = null;
@@ -909,9 +907,11 @@ export class Renderer implements Renderable {
    * This is the sole rendering path — no procedural fallback meshes.
    */
   private async _initGlbOverlays(batsmanAvatarId?: string): Promise<void> {
-    await bonusGLBAssets.preload();
-    // GLBs are now cached — allow syncBonusObjects to create meshes with GLB models.
-    this._bonusGLBsReady = true;
+    // Kick off the bonus-prop GLBs without blocking — character attachment must not
+    // wait for the (large) rover/spider/aircraft downloads. syncBonusObjects renders a
+    // procedural placeholder immediately and swaps to each GLB the moment it loads.
+    // (CricketSimulation also starts this at mount; preload() is idempotent.)
+    void bonusGLBAssets.preload();
 
     type PlayerId = Parameters<typeof instantiateCharacter>[0];
 
@@ -1207,11 +1207,22 @@ export class Renderer implements Renderable {
   }
 
   private syncBonusObjects(): void {
-    if (!this._bonusGLBsReady) return;
     if (!this.snapshot) return;
     const nextIds = new Set(this.snapshot.bonusObjects.map((b) => b.id));
     for (const bonus of this.snapshot.bonusObjects) {
-      if (this.bonusMeshes.has(bonus.id)) continue;
+      const existing = this.bonusMeshes.get(bonus.id);
+      if (existing) {
+        // Upgrade a procedural placeholder to its real GLB once that specific asset
+        // has finished loading — one slow asset never blocks the others.
+        if (existing.needsGlbUpgrade && existing.glbKey && bonusGLBAssets.isLoaded(existing.glbKey)) {
+          this.scene.three.remove(existing.root);
+          existing.dispose();
+          const upgraded = new BonusObject3D(bonus);
+          this.bonusMeshes.set(bonus.id, upgraded);
+          this.scene.add(upgraded.root);
+        }
+        continue;
+      }
       const node = new BonusObject3D(bonus);
       this.bonusMeshes.set(bonus.id, node);
       this.scene.add(node.root);

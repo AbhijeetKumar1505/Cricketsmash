@@ -99,7 +99,7 @@
       disabled={!canBonusBuy}
       onclick={handleBonusBuy}
       aria-label="Bonus buy"
-      title="Bonus Buy — min bet {game.bonusBuyMinBet}"
+      title="Bonus Buy"
     >
       <span class="chip-icon" aria-hidden="true">
         <svg viewBox="0 0 22 22" width="18" height="18" fill="none">

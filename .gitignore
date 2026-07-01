@@ -7,3 +7,6 @@ dist
 .DS_Store
 coverage
 .turbo
+
+# Pristine GLB originals kept locally for re-running tools/compress-glb.mjs
+asset-backups/

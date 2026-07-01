@@ -232,15 +232,16 @@ export const FIELDER_SLOTS: ReadonlyArray<FielderSlot> = FIXED_FIELD_MAP;
  * - **Rover / spider (`movingMult`)**: turf patrol only.
  */
 export const BONUS_SKILL_ZONES: ReadonlyArray<BonusSkillZone> = [
-  // Stand hoardings repositioned to lie within the arc a six travels (−Z outfield, X ≤ ±11).
-  { id: 'sky_bonus_far_l',    x:  -9.0, y: 7.5, z: -23.0, zone: 'stands', placementWeight: 0.5,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 3, hitRadius: 1.92 },
-  { id: 'sky_bonus_mid_l',    x:  -5.5, y: 7.0, z: -18.5, zone: 'stands', placementWeight: 0.52, role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 2, hitRadius: 1.82 },
-  { id: 'sky_bonus_far_r',    x:   9.0, y: 7.5, z: -23.0, zone: 'stands', placementWeight: 0.5,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 2, hitRadius: 1.92 },
-  { id: 'sky_bonus_mid_r',    x:   5.5, y: 7.0, z: -18.5, zone: 'stands', placementWeight: 0.52, role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 3, hitRadius: 1.82 },
-  { id: 'field_bonus_arc_l',  x: -11.0, y: 7.2, z: -16.5, zone: 'stands', placementWeight: 1.0,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 2, hitRadius: 1.18 },
-  { id: 'field_bonus_arc_r',  x:  11.0, y: 7.2, z: -16.5, zone: 'stands', placementWeight: 1.0,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 2, hitRadius: 1.18 },
-  { id: 'field_bonus_deep_l', x:  -3.5, y: 6.8, z: -24.5, zone: 'stands', placementWeight: 0.9,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 1, hitRadius: 1.08 },
-  { id: 'field_bonus_deep_r', x:   3.5, y: 6.8, z: -24.5, zone: 'stands', placementWeight: 0.9,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 3, hitRadius: 1.08 },
+  // Stand hoardings: X positions evenly spread & symmetric (±2.75, ±5.5, ±8.25, ±11),
+  // kept within ±11 so a six can still reach them. Depth (z) unchanged.
+  { id: 'sky_bonus_far_l',    x: -25.25, y: 7.5, z: -23.0, zone: 'stands', placementWeight: 0.5,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 3, hitRadius: 1.92 },
+  { id: 'sky_bonus_mid_l',    x:  -8.5, y: 6.6, z: -18.5, zone: 'stands', placementWeight: 0.52, role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 2, hitRadius: 1.82 },
+  { id: 'sky_bonus_far_r',    x:  25.25, y: 7.5, z: -23.0, zone: 'stands', placementWeight: 0.5,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 2, hitRadius: 1.92 },
+  { id: 'sky_bonus_mid_r',    x:   8.5, y: 6.6, z: -18.5, zone: 'stands', placementWeight: 0.52, role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 3, hitRadius: 1.82 },
+  { id: 'field_bonus_arc_l',  x: -14.0, y: 6.5, z: -16.5, zone: 'stands', placementWeight: 1.0,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 2, hitRadius: 1.18 },
+  { id: 'field_bonus_arc_r',  x:  14.0, y: 6.5, z: -16.5, zone: 'stands', placementWeight: 1.0,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 2, hitRadius: 1.18 },
+  { id: 'field_bonus_deep_l', x: -4.75, y: 6.8, z: -24.5, zone: 'stands', placementWeight: 0.9,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 1, hitRadius: 1.08 },
+  { id: 'field_bonus_deep_r', x:  4.75, y: 6.8, z: -24.5, zone: 'stands', placementWeight: 0.9,  role: 'ballAdder', visual: 'hoarding', ballAdderAmount: 3, hitRadius: 1.08 },
 
   { id: 'bonus_rover_alpha', x: -6.4, y: 0.1, z: -11.6, zone: 'ground', placementWeight: 0.7, role: 'movingMult', visual: 'rover', hitRadius: 0.60, profitMultValue: 5 },
   { id: 'bonus_spider_beta', x: 6.55, y: 0.1, z: -13.5, zone: 'ground', placementWeight: 0.7, role: 'movingMult', visual: 'spider', hitRadius: 0.52, profitMultValue: 7 },

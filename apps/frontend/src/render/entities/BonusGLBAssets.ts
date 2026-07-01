@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGlbLoader } from '../glbLoader.js';
 
 type BonusGLBKey = 'rover' | 'spider' | 'aircraft';
 
@@ -58,7 +58,7 @@ function processScene(key: BonusGLBKey, scene: THREE.Group): void {
 
 class BonusGLBAssets {
   private readonly _cache = new Map<BonusGLBKey, THREE.Group>();
-  private readonly _loader = new GLTFLoader();
+  private readonly _loader = createGlbLoader();
   private _preloadPromise: Promise<void> | null = null;
 
   preload(): Promise<void> {

@@ -16,6 +16,7 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "@gltf-transform/cli": "^4.4.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@types/node": "^22.10.5",
     "@vitest/ui": "^4.1.5",
@@ -30,6 +31,8 @@
     "test:fairness": "npx --yes pnpm@10.5.0 --filter @cricket-crash/fairness run test",
     "test:fairness:slow": "npx --yes pnpm@10.5.0 --filter @cricket-crash/fairness run test:slow",
     "replay:decomposition": "node ./tools/replay-decomposition.mjs",
+    "copy:decoders": "node ./tools/copy-decoders.mjs",
+    "compress:glb": "node ./tools/compress-glb.mjs",
     "dev": "npm run build:packages && npx --yes pnpm@10.5.0 --filter @cricket-crash/frontend run dev",
     "dev:frontend": "npm run build:packages && npx --yes pnpm@10.5.0 --filter @cricket-crash/frontend dev",
     "typecheck": "npx --yes pnpm@10.5.0 -r run typecheck",
