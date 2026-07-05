@@ -183,9 +183,9 @@ function makeSponsorTexture(brand: { name: string; bg: string; fg: string }): TH
 
 function makeScoreboardTexture(
   cv: HTMLCanvasElement,
-  ballIdx: number,
-  totalBalls: number,
+  winAmount: number,
   multiplier: number,
+  currencySym: string,
 ): void {
   const w = 512;
   const h = 256;
@@ -202,37 +202,42 @@ function makeScoreboardTexture(
   cx.lineWidth = 4;
   cx.strokeRect(18, 18, w - 36, h - 36);
 
+  cx.textAlign = 'center';
+  cx.textBaseline = 'middle';
+
+  // Title
   cx.shadowBlur = 18;
   cx.shadowColor = '#ffb800';
   cx.fillStyle = '#ffd95a';
-  cx.font = 'bold 28px Arial, sans-serif';
-  cx.textAlign = 'center';
-  cx.textBaseline = 'middle';
-  cx.fillText('CRICKET CRASH', w / 2, 50);
+  cx.font = 'bold 30px Arial, sans-serif';
+  cx.fillText('CRICKET CRASH', w / 2, 62);
 
-  cx.shadowBlur = 0;
-  cx.fillStyle = 'rgba(255, 241, 163, 0.55)';
-  cx.font = '20px Arial, sans-serif';
-  cx.fillText(`BALL ${ballIdx + 1} OF ${totalBalls}`, w / 2, 92);
+  const hasWin = winAmount > 0;
+  const isMega = hasWin && multiplier > 3;
 
-  const pipR = 14;
-  const pipGap = 36;
-  const startX = w / 2 - ((totalBalls - 1) * pipGap) / 2;
-  for (let i = 0; i < totalBalls; i++) {
-    cx.beginPath();
-    cx.arc(startX + i * pipGap, 134, pipR, 0, Math.PI * 2);
-    cx.fillStyle = i < ballIdx ? '#00ff99' : i === ballIdx ? '#ffd95a' : '#2a3550';
-    cx.fill();
-    cx.strokeStyle = '#ffb800';
-    cx.lineWidth = 2;
-    cx.stroke();
+  if (!hasWin) {
+    // Idle / no win — money-only design, no multipliers
+    cx.shadowBlur = 0;
+    cx.fillStyle = 'rgba(255, 241, 163, 0.6)';
+    cx.font = 'bold 26px Arial, sans-serif';
+    cx.fillText('PLACE YOUR BET', w / 2, 158);
+    return;
+  }
+
+  if (isMega) {
+    cx.shadowBlur = 14;
+    cx.shadowColor = '#ffd95a';
+    cx.fillStyle = '#ffe27a';
+    cx.font = 'bold 26px Arial, sans-serif';
+    cx.fillText('MEGA WIN', w / 2, 118);
   }
 
   cx.shadowBlur = 24;
-  cx.shadowColor = multiplier >= 2 ? '#00ff99' : '#ffb800';
-  cx.fillStyle = multiplier >= 2 ? '#00ff99' : '#ffd95a';
-  cx.font = `bold ${multiplier >= 10 ? 44 : 54}px Arial, sans-serif`;
-  cx.fillText(`x${multiplier.toFixed(2)}`, w / 2, 196);
+  cx.shadowColor = isMega ? '#ffd95a' : '#00ff99';
+  cx.fillStyle = isMega ? '#ffe27a' : '#00ff99';
+  const amtText = `${currencySym}${winAmount.toFixed(2)}`;
+  cx.font = `bold ${amtText.length > 9 ? 44 : 54}px Arial, sans-serif`;
+  cx.fillText(amtText, w / 2, isMega ? 182 : 166);
 }
 
 type CrowdSprite = {
@@ -309,13 +314,13 @@ export class StadiumEntity {
     this.root.add(this._crowd);
 
     this._scoreboardCanvas = document.createElement('canvas');
-    makeScoreboardTexture(this._scoreboardCanvas, 0, 6, 1.0);
+    makeScoreboardTexture(this._scoreboardCanvas, 0, 1, '$');
     this._scoreboardTex = toTexture(this._scoreboardCanvas);
     this.buildScoreboard();
   }
 
-  updateScoreboard(ballIdx: number, totalBalls: number, multiplier: number): void {
-    makeScoreboardTexture(this._scoreboardCanvas, ballIdx, totalBalls, multiplier);
+  updateScoreboard(winAmount: number, multiplier: number, currencySym: string): void {
+    makeScoreboardTexture(this._scoreboardCanvas, winAmount, multiplier, currencySym);
     this._scoreboardTex.needsUpdate = true;
   }
 

@@ -7,12 +7,12 @@
 
   const DIFFICULTIES: {
     id: Difficulty; playerId: PlayerId;
-    name: string; sub: string; desc: string; mult: string; accent: string;
+    name: string; sub: string; desc: string; skill: string; accent: string;
   }[] = [
-    { id: 'easy',   playerId: 'modi',  name: 'EASY',     sub: 'Tier 1', desc: 'Slower bowler. Wider hitbox. Great for beginners.',       mult: '×1.0',  accent: '#00cc66' },
-    { id: 'medium', playerId: 'putin', name: 'MEDIUM',   sub: 'Tier 2', desc: 'Balanced challenge. Standard bowler speed.',               mult: '×1.2',  accent: '#ffc800' },
-    { id: 'hard',   playerId: 'trump', name: 'HARD',     sub: 'Tier 3', desc: 'Faster bowler. Tighter hitbox. Higher risk.',             mult: '×1.5',  accent: '#ff7700' },
-    { id: 'god',    playerId: 'adeft', name: 'GOD MODE', sub: 'Tier 4', desc: 'Binary fate: wicket or a massive SIX. No in-between.',    mult: '×2.0+', accent: '#aa00ff' },
+    { id: 'easy',   playerId: 'modi',  name: 'EASY',     sub: 'Tier 1', desc: 'Slower bowler. Wider hitbox. Great for beginners.',       skill: 'CASUAL', accent: '#00cc66' },
+    { id: 'medium', playerId: 'putin', name: 'MEDIUM',   sub: 'Tier 2', desc: 'Balanced challenge. Standard bowler speed.',               skill: 'PRO',    accent: '#ffc800' },
+    { id: 'hard',   playerId: 'trump', name: 'HARD',     sub: 'Tier 3', desc: 'Faster bowler. Tighter hitbox. Higher skill.',            skill: 'EXPERT', accent: '#ff7700' },
+    { id: 'god',    playerId: 'adeft', name: 'GOD MODE', sub: 'Tier 4', desc: 'Binary fate: wicket or a massive SIX. No in-between.',    skill: 'LEGEND', accent: '#aa00ff' },
   ];
 
   function select(id: Difficulty, playerId: string) {
@@ -56,8 +56,8 @@
             </div>
             <!-- Gradient fade into card body -->
             <div class="avatar-fade" style="--acc:{d.accent}"></div>
-            <!-- Mult badge overlaid bottom-right of portrait -->
-            <span class="portrait-mult">{d.mult}</span>
+            <!-- Skill badge overlaid bottom-right of portrait -->
+            <span class="portrait-mult">{d.skill}</span>
           </div>
 
           <!-- Text info -->

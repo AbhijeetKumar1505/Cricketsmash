@@ -24,13 +24,13 @@
     );
   });
 
-  const totalReturn = $derived(betAmount + profit);
+  // Winning amount only — no multipliers, no negatives.
+  const winAmount = $derived(Math.max(0, betAmount + profit));
+  const isMega    = $derived(!wasWicket && multiplier > 3);
 
-  const accentColor = $derived(wasWicket ? '#ff1e3c' : profit > 0 ? '#00ff88' : '#ffc800');
-  const accentRgb   = $derived(wasWicket ? '255,30,60' : profit > 0 ? '0,255,136' : '255,200,0');
-  const profitSign  = $derived(profit > 0 ? '+' : profit < 0 ? '−' : '');
-  const profitColor = $derived(profit > 0 ? '#00ff88' : profit < 0 ? '#ff3355' : '#ffc800');
-  const multLabel   = $derived(multiplier <= 0 ? '0.00x' : `${multiplier.toFixed(2)}x`);
+  const accentColor = $derived(wasWicket ? '#ff1e3c' : winAmount > 0 ? '#00ff88' : '#ffc800');
+  const accentRgb   = $derived(wasWicket ? '255,30,60' : winAmount > 0 ? '0,255,136' : '255,200,0');
+  const statusLabel = $derived(wasWicket ? 'WICKET' : isMega ? 'MEGA WIN' : winAmount > 0 ? 'YOU WIN' : 'NO WIN');
 </script>
 
 <div
@@ -43,23 +43,23 @@
     <!-- Glow ring -->
     <div class="sc-ring" aria-hidden="true"></div>
 
-    <!-- Multiplier — small chip at top -->
-    <div class="sc-mult-chip">
-      <span class="sc-mult-val">{multLabel}</span>
+    <!-- Status — small chip at top -->
+    <div class="sc-mult-chip" class:is-mega={isMega}>
+      <span class="sc-mult-val">{statusLabel}</span>
     </div>
 
-    <!-- PROFIT — hero number -->
+    <!-- WINNINGS — hero number -->
     <div class="sc-profit-wrap">
-      <span class="sc-profit-label">PROFIT</span>
-      <span class="sc-profit-val" style="color:{profitColor}">
-        {profitSign}{Math.abs(profit).toFixed(2)}
+      <span class="sc-profit-label">YOU WIN</span>
+      <span class="sc-profit-val" style="color:{accentColor}">
+        {winAmount.toFixed(2)}
       </span>
     </div>
 
-    <!-- Total return — secondary -->
+    <!-- Stake — secondary -->
     <div class="sc-return-wrap">
-      <span class="sc-return-label">TOTAL RETURN</span>
-      <span class="sc-return-val">{totalReturn.toFixed(2)}</span>
+      <span class="sc-return-label">STAKE</span>
+      <span class="sc-return-val">{betAmount.toFixed(2)}</span>
     </div>
 
   </div>
@@ -140,6 +140,22 @@
     letter-spacing: 0.10em;
     color: var(--acc);
     text-shadow: 0 0 10px rgba(var(--acc-rgb), 0.60);
+  }
+
+  .sc-mult-chip.is-mega {
+    border-color: rgba(255, 210, 90, 0.6);
+    background: rgba(255, 210, 90, 0.12);
+    animation: sc-mega-pulse 1s ease-in-out infinite;
+  }
+  .sc-mult-chip.is-mega .sc-mult-val {
+    color: #ffe27a;
+    text-shadow: 0 0 14px rgba(255, 210, 90, 0.9);
+    letter-spacing: 0.22em;
+  }
+
+  @keyframes sc-mega-pulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(255, 210, 90, 0); }
+    50%      { box-shadow: 0 0 20px rgba(255, 210, 90, 0.45); }
   }
 
   /* PROFIT — hero */

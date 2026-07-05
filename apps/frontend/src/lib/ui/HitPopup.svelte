@@ -38,10 +38,10 @@
 
   function qualityLabel(q: string, mult: number): string {
     if (q === 'miss') return 'MISS';
-    if (mult >= 10) return `PERFECT HIT · ${mult.toFixed(1)}×`;
-    if (mult >= 3)  return `BIG HIT · ${mult.toFixed(1)}×`;
-    if (q === 'good') return `GOOD HIT · ${mult.toFixed(1)}×`;
-    return `HIT · ${mult.toFixed(1)}×`;
+    if (mult >= 10) return 'PERFECT HIT';
+    if (mult > 3)   return 'MEGA HIT';
+    if (q === 'good') return 'GOOD HIT';
+    return 'HIT';
   }
 
   function qualityColor(q: string, mult: number): string {

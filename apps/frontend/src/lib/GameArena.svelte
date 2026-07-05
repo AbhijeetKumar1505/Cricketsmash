@@ -1,8 +1,14 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import MultiplierDisplay from "./ui/MultiplierDisplay.svelte";
-  import RiskIndicator from "./ui/RiskIndicator.svelte";
   import ScorecardOverlay from "./ui/ScorecardOverlay.svelte";
+  import { game } from "../core/gameController.svelte.js";
+
+  const ARENA_CURRENCY_SYMBOLS: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", INR: "₹", CAD: "CA$", AUD: "A$",
+    JPY: "¥", BRL: "R$", BTC: "₿", ETH: "Ξ",
+  };
+  const arenaCurr = $derived(ARENA_CURRENCY_SYMBOLS[game.currency] ?? game.currency);
 
   import type { SkyObjectType } from "../engine/sky/types.js";
 
@@ -61,40 +67,15 @@
   } = $props();
 
   const isCrashed = $derived(arenaStatus === "wicket");
-  const isLive = $derived(
-    arenaStatus === "hitting" || arenaStatus === "bowling",
-  );
-  const isHitting = $derived(arenaStatus === "hitting");
 
   const simOpacity = $derived(
     // Three.js canvas is alpha:false (opaque) — no blending needed.
     isCrashed ? 0.85 : 1,
   );
 
-  // Color reactivity spectrum — neon stadium palette
-  const accentColor = $derived(
-    isCrashed
-      ? "#ff1e3c"
-      : accumulatedMult >= 10
-        ? "#ff00ff" // Neon Magenta
-        : accumulatedMult >= 5
-          ? "#00ffff" // Neon Cyan
-          : accumulatedMult >= 2
-            ? "#00ff88"
-            : "#6366f1", // Indigo default
-  );
-
-  const accentRgb = $derived(
-    isCrashed
-      ? "255,30,60"
-      : accumulatedMult >= 10
-        ? "255,0,255"
-        : accumulatedMult >= 5
-          ? "0,255,255"
-          : accumulatedMult >= 2
-            ? "0,255,136"
-            : "99,102,241",
-  );
+  // Neutral, constant stadium ambiance — no multiplier-reactive neon coloring.
+  const accentColor = "#ffe1aa";
+  const accentRgb = "255, 225, 170";
 
   // Glow intensity: 0→1 as multiplier goes 1→10
   const glowIntensity = $derived(Math.min(1, (accumulatedMult - 1) / 9));
@@ -116,9 +97,6 @@
     delay: `${-(i * 0.48)}s`,
     drift: `${-26 + ((i * 5.3) % 52)}px`,
   }));
-
-  // Stadium light flicker timing (only at mid-high multipliers)
-  const flickerActive = $derived(isLive && accumulatedMult >= 4);
 
   // ─── Between-ball broadcast: two-stage result card ───
   let resultStage = $state(0); // 0=off, 1=show result text, 2=show multiplier
@@ -204,20 +182,6 @@
   <div class="arena-fog arena-fog-bottom" aria-hidden="true"></div>
   <div class="arena-fog arena-fog-top" aria-hidden="true"></div>
 
-  <!-- ─── Stadium light flicker (mid-high tension) ─── -->
-  {#if flickerActive}
-    <div
-      class="absolute inset-0 z-[20] pointer-events-none"
-      style="
-        background: rgba({accentRgb}, 0.03);
-        animation: neon-flicker {Math.max(
-        1.5,
-        5 - accumulatedMult * 0.3,
-      )}s ease-in-out infinite;
-      "
-    ></div>
-  {/if}
-
   <!-- ─── Always-on floating particles ─── -->
   <div
     class="absolute inset-0 z-[22] overflow-hidden pointer-events-none"
@@ -240,33 +204,25 @@
     "
   ></div>
 
-  <!-- ─── Edge glow (reactive to multiplier) ─── -->
+  <!-- ─── Edge glow (constant, subtle — no colored neon light-up on hit) ─── -->
   <div
     class="absolute inset-0 z-[24] pointer-events-none transition-all duration-300"
-    style="box-shadow: inset 0 0 {edgeGlow}px rgba({accentRgb}, {(isLive
-      ? 0.28 + glowIntensity * 0.32
-      : 0.07
-    ).toFixed(3)})"
+    style="box-shadow: inset 0 0 24px rgba({accentRgb}, 0.07)"
   ></div>
 
-  <!-- ─── Breathing glow (always on, dims when not live) ─── -->
+  <!-- ─── Breathing glow (constant, subtle) ─── -->
   <div
     class="absolute inset-0 z-[23] pointer-events-none rounded-[2.5rem] overflow-hidden"
   >
     <div
       class="absolute inset-[-20%] rounded-full"
       style="
-        background: radial-gradient(circle, rgba({accentRgb}, {isLive
-        ? 0.09
-        : 0.03}) 0%, transparent 60%);
+        background: radial-gradient(circle, rgba({accentRgb}, 0.03) 0%, transparent 60%);
         animation: glow-breathe var(--pulse-dur, 1.4s) ease-in-out infinite;
         will-change: opacity, transform;
       "
     ></div>
   </div>
-
-  <!-- ─── Risk indicator vignette (from RiskIndicator component) ─── -->
-  <RiskIndicator multiplier={accumulatedMult} status={arenaStatus} />
 
   <!-- ─── CRT Scanlines ─── -->
   <div
@@ -295,14 +251,6 @@
     {@render children()}
   </div>
 
-  <!-- ─── Impact flash on hit ─── -->
-  {#if isHitting}
-    <div
-      class="impact-flash absolute inset-0 z-[100] pointer-events-none"
-      style="background: radial-gradient(ellipse at 50% 65%, rgba({accentRgb}, 0.55) 0%, transparent 70%)"
-    ></div>
-  {/if}
-
   <!-- ─── Floating HUD Shell ─── -->
   <div
     class="absolute inset-0 z-30 pointer-events-none flex flex-col justify-between p-5 md:p-7"
@@ -313,15 +261,9 @@
     <!-- Center: Commentary / waiting state / between-ball broadcast -->
     <div class="flex-1 flex items-center justify-center">
       {#if arenaStatus === "waiting"}
-        <div class="flex flex-col items-center gap-4">
-          <div
-            class="px-6 py-3 glass-panel waiting-chip rounded-2xl border border-white/10 animate-pulse"
-          >
-            <span
-              class="text-xs font-label font-black text-on-surface-variant/40 uppercase tracking-[0.4em]"
-            >
-              Waiting for First Bet
-            </span>
+        <div class="flex flex-col items-center">
+          <div class="waiting-chip px-7 py-3.5 rounded-2xl">
+            <span class="waiting-text">TAP&nbsp;<span class="waiting-accent">PLACE BET</span>&nbsp;TO PLAY</span>
           </div>
         </div>
       {:else if arenaStatus === "result" && resultStage === 1}
@@ -375,7 +317,7 @@
       class:sky-toast--big={skyHitToast.multiplier >= 100}
       style={`--bonus-color: ${skyHitToast.type === "JETPACK" ? "#ffd84e" : skyHitToast.type === "SMALL_PLANE" ? "#58d6ff" : "#ff4fd8"}`}
     >
-      +{skyHitToast.multiplier}x
+      MEGA WIN +{arenaCurr}{(game.betAmount * skyHitToast.multiplier).toFixed(2)}
     </div>
   {/if}
 
@@ -445,11 +387,6 @@
       transparent 100%
     );
     animation-delay: 3.5s;
-  }
-
-  /* ─── Impact flash ─── */
-  .impact-flash {
-    animation: impact-flash 0.6s ease-out forwards;
   }
 
   /* ─── Between-ball broadcast card ─── */
@@ -632,15 +569,37 @@
 
   .waiting-chip {
     background: linear-gradient(180deg,
-      rgba(255, 184, 0, 0.04) 0%,
-      rgba(4, 10, 30, 0.82) 100%);
-    border: 1px solid rgba(255, 184, 0, 0.18) !important;
+      rgba(255, 184, 0, 0.12) 0%,
+      rgba(4, 10, 30, 0.92) 100%);
+    border: 1px solid rgba(255, 184, 0, 0.45) !important;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.55),
-      inset 0 1px 0 rgba(255, 241, 163, 0.08);
+      0 0 0 1px rgba(255, 255, 255, 0.05),
+      0 10px 28px rgba(0, 0, 0, 0.6),
+      0 0 22px rgba(255, 184, 0, 0.22),
+      inset 0 1px 0 rgba(255, 241, 163, 0.14);
+    animation: waiting-breathe 2.2s ease-in-out infinite;
+  }
+
+  .waiting-text {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 900;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255, 241, 205, 0.92);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+    white-space: nowrap;
+  }
+  .waiting-accent {
+    color: var(--gold-bright, #ffc800);
+    text-shadow: 0 0 14px rgba(255, 184, 0, 0.6);
+  }
+
+  @keyframes waiting-breathe {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(255,255,255,0.05), 0 10px 28px rgba(0,0,0,0.6), 0 0 18px rgba(255,184,0,0.18), inset 0 1px 0 rgba(255,241,163,0.14); }
+    50%       { box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 10px 28px rgba(0,0,0,0.6), 0 0 30px rgba(255,184,0,0.34), inset 0 1px 0 rgba(255,241,163,0.16); }
   }
 
   @keyframes broadcast-float {

@@ -212,9 +212,9 @@ export class EngineBridge {
     this.renderer.resize(width, height);
   }
 
-  /** Push scoreboard state to the 3D stadium display. */
-  updateScoreboard(ballIdx: number, totalBalls: number, multiplier: number): void {
-    this.renderer.updateScoreboard(ballIdx, totalBalls, multiplier);
+  /** Push scoreboard state to the 3D stadium display (money-only). */
+  updateScoreboard(winAmount: number, multiplier: number, currencySym: string): void {
+    this.renderer.updateScoreboard(winAmount, multiplier, currencySym);
   }
 
   /** Slightly wider camera while autobet is active (reduces visual fatigue). */

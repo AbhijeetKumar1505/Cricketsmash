@@ -3,7 +3,6 @@
   import { fly } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   import {
-    swing,
     game,
     nudgeBetAmount,
     setBetAmount,
@@ -43,6 +42,16 @@
     if (Number.isFinite(v) && v > 0) setBetAmount(v);
   }
 
+  // Quick-stake chips — setBetAmount clamps to the table min/max.
+  function setStake(mode: 'half' | 'double' | 'max') {
+    if (stakeLocked) return;
+    const v = mode === 'half' ? game.betAmount / 2
+            : mode === 'double' ? game.betAmount * 2
+            : game.balance;
+    setBetAmount(v);
+    playBlip(mode === 'max' ? 640 : 520, 0.05);
+  }
+
   function handleAutoClick() {
     // Click: toggle autobet directly with current config.
     // Right-click / long-press / chevron tap: open config overlay.
@@ -62,11 +71,6 @@
   }
 
   function handleMainPress() {
-    if (game.visualPhase === 'bowl') {
-      swing();
-      playBlip(600, 0.07);
-      return;
-    }
     if (isLocked && actionState !== 'cashout') return;
     playBlip(actionState === 'cashout' ? 700 : 440, 0.07);
     if (actionState === 'cashout') onCashout();
@@ -75,9 +79,10 @@
 
   const isLocked = $derived(actionState === 'waiting' || actionState === 'watching');
 
-  const btnState = $derived.by((): 'bet' | 'hit' | 'cashout' | 'locked' => {
+  // Swing is autonomous (driven by the probability-chosen delivery in the
+  // controller), so the button only ever surfaces bet / cashout / locked.
+  const btnState = $derived.by((): 'bet' | 'cashout' | 'locked' => {
     if (actionState === 'cashout') return 'cashout';
-    if (game.visualPhase === 'bowl') return 'hit';
     if (isLocked) return 'locked';
     return 'bet';
   });
@@ -109,7 +114,7 @@
   const currDecimals = $derived(CURRENCY_DECIMALS[game.currency] ?? 2);
 
   const btnDisabled = $derived(
-    (isLocked || disabled) && actionState !== 'cashout' && game.visualPhase !== 'bowl'
+    (isLocked || disabled) && actionState !== 'cashout'
   );
 
   const bonusBuySurcharge = $derived(game.betAmount * 0.30);
@@ -126,6 +131,15 @@
 
   let insAlert = $state<string | null>(null);
   let insAlertTimer = 0;
+
+  // Bonus / insurance popover (opens just above the BONUS button)
+  let showBonusMenu = $state(false);
+  function toggleBonusMenu(e: Event) {
+    e.stopPropagation();
+    if (game.betActive || game.sessionActive) return;
+    showBonusMenu = !showBonusMenu;
+    playBlip(showBonusMenu ? 600 : 380, 0.05);
+  }
 
   function scheduleBonusAlertClear() {
     setTimeout(() => { game.bonusBuyAlert = null; }, 2200);
@@ -150,12 +164,14 @@
     }
     void placeBonusBuy();
     playBlip(800, 0.1);
+    showBonusMenu = false;
   }
 
   function handleInsurance() {
     if (game.insuranceActive) {
       deactivateInsurance();
       playBlip(440, 0.08);
+      showBonusMenu = false;
       return;
     }
     if (game.betActive || game.sessionActive) return;
@@ -166,15 +182,21 @@
     }
     activateInsurance();
     playBlip(700, 0.1);
+    showBonusMenu = false;
   }
 </script>
 
+<svelte:window onclick={() => { if (showBonusMenu) showBonusMenu = false; }} />
+
 {#if game.winToast}
   <div class="win-toast"
+       class:win-toast--mega={game.winToast.multiplier > 3}
        transition:fly={{ y: -20, duration: 350, easing: cubicOut }}
        onintroend={() => playWinTrin(game.winToast?.multiplier ?? 1)}>
+    {#if game.winToast.multiplier > 3}
+      <span class="win-mega">MEGA WIN</span>
+    {/if}
     <span class="win-amt">+{currSymbol}{game.winToast.amount.toFixed(currDecimals)}</span>
-    <span class="win-mult">{game.winToast.multiplier.toFixed(2)}×</span>
   </div>
 {/if}
 
@@ -204,6 +226,11 @@
           />
         </div>
         <button class="adj" onclick={() => handleAdjust(1)} disabled={stakeLocked} aria-label="Increase bet">+</button>
+      </div>
+      <div class="stake-chips">
+        <button class="stake-chip" onclick={() => setStake('half')} disabled={stakeLocked} aria-label="Halve bet">½</button>
+        <button class="stake-chip" onclick={() => setStake('double')} disabled={stakeLocked} aria-label="Double bet">2×</button>
+        <button class="stake-chip" onclick={() => setStake('max')} disabled={stakeLocked} aria-label="Max bet">MAX</button>
       </div>
     </div>
 
@@ -241,7 +268,7 @@
       </button>
     </div>
 
-    <!-- ④ Feature Chips — BUY + INS -->
+    <!-- ④ Bonus — big button with Bonus Buy + Insurance popover -->
     <div class="cell cell-chips" style="position:relative;">
       {#if game.bonusBuyAlert}
         <div class="bb-alert bb-alert-buy" transition:fly={{ y: -8, duration: 200 }}>
@@ -252,26 +279,53 @@
           {insAlert}
         </div>
       {/if}
+
+      {#if showBonusMenu}
+        <div
+          class="bonus-menu"
+          role="menu"
+          transition:fly={{ y: 8, duration: 160, easing: cubicOut }}
+        >
+          <button
+            class="bonus-opt"
+            class:is-disabled={!canBonusBuy}
+            onclick={handleBonusBuy}
+            aria-label="Bonus Buy"
+          >
+            <span class="opt-icon">★</span>
+            <span class="opt-text">
+              <span class="opt-title">Bonus Buy</span>
+              <span class="opt-sub">Powerplay over · +{currSymbol}{bonusBuySurcharge.toFixed(currDecimals)}</span>
+            </span>
+          </button>
+          <button
+            class="bonus-opt"
+            class:is-active={game.insuranceActive}
+            class:is-disabled={!canInsurance && !game.insuranceActive}
+            onclick={handleInsurance}
+            aria-label={game.insuranceActive ? 'Deactivate insurance' : 'Insurance Buy'}
+          >
+            <span class="opt-icon">🛡</span>
+            <span class="opt-text">
+              <span class="opt-title">Insurance Buy{game.insuranceActive ? ' · ON' : ''}</span>
+              <span class="opt-sub">Refund on wicket · {currSymbol}{insuranceCost.toFixed(currDecimals)}</span>
+            </span>
+          </button>
+        </div>
+      {/if}
+
       <button
-        class="feat-chip"
-        class:is-disabled={!canBonusBuy}
-        onclick={handleBonusBuy}
-        aria-label="Bonus Buy"
+        class="bonus-main"
+        class:menu-open={showBonusMenu}
+        class:has-active={game.insuranceActive}
+        onclick={toggleBonusMenu}
+        aria-haspopup="menu"
+        aria-expanded={showBonusMenu}
+        aria-label="Bonus and insurance options"
       >
-        <span class="chip-icon">★</span>
-        <span class="chip-label">BUY</span>
-        <span class="chip-sub">+{bonusBuySurcharge.toFixed(currDecimals)}</span>
-      </button>
-      <button
-        class="feat-chip"
-        class:is-active={game.insuranceActive}
-        class:is-disabled={!canInsurance && !game.insuranceActive}
-        onclick={handleInsurance}
-        aria-label={game.insuranceActive ? 'Deactivate insurance' : 'Activate insurance'}
-      >
-        <span class="chip-icon">🛡</span>
-        <span class="chip-label">INS</span>
-        <span class="chip-sub">{currSymbol}{insuranceCost.toFixed(currDecimals)}</span>
+        <span class="bonus-main-icon">★</span>
+        <span class="bonus-main-label">BONUS</span>
+        {#if game.insuranceActive}<span class="bonus-main-dot" aria-hidden="true"></span>{/if}
       </button>
     </div>
 
@@ -280,11 +334,10 @@
       <button
         class="bet-btn"
         class:state-cashout={btnState === 'cashout'}
-        class:state-hit={btnState === 'hit'}
         class:state-locked={btnState === 'locked'}
         onclick={handleMainPress}
         disabled={btnDisabled}
-        aria-label={btnState === 'cashout' ? 'Cash out' : btnState === 'hit' ? 'Hit' : 'Place bet'}
+        aria-label={btnState === 'cashout' ? 'Cash out' : 'Place bet'}
       >
         <div class="btn-face">
           {#if btnState === 'cashout'}
@@ -293,8 +346,6 @@
             {#if payout > 0}
               <span class="btn-payout">{currSymbol}{payout.toFixed(currDecimals)}</span>
             {/if}
-          {:else if btnState === 'hit'}
-            <span class="btn-big">HIT</span>
           {:else if btnState === 'locked'}
             <span class="btn-word">WAIT</span>
           {:else}
@@ -412,6 +463,37 @@
 
   .adj:active:not(:disabled) { filter: brightness(0.85); transform: scale(0.96); }
   .adj:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* Quick-stake chips */
+  .stake-chips {
+    display: flex;
+    gap: 6px;
+    margin-top: 5px;
+    justify-content: center;
+  }
+  .stake-chip {
+    flex: 1 1 auto;
+    max-width: 74px;
+    height: 22px;
+    border-radius: 7px;
+    border: 1px solid var(--crystal-bd);
+    background: linear-gradient(180deg, var(--crystal-2), var(--crystal-1));
+    color: var(--gold-cream);
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.6rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    padding: 0;
+    transition: filter 0.12s, border-color 0.15s, color 0.15s;
+  }
+  .stake-chip:hover:not(:disabled) {
+    filter: brightness(1.25);
+    border-color: var(--gold-edge);
+    color: var(--gold-bright);
+  }
+  .stake-chip:active:not(:disabled) { filter: brightness(0.85); transform: scale(0.96); }
+  .stake-chip:disabled { opacity: 0.3; cursor: not-allowed; }
 
   .bet-input-wrap {
     flex: 1 1 auto;
@@ -548,58 +630,59 @@
     border-color: var(--gold-edge);
   }
 
-  /* ── ④ Feature Chips ────────────────────────────────────────────────────── */
-  .feat-chip {
+  /* ── ④ Bonus button — big, opens popover ─────────────────────────────────── */
+  .bonus-main {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 1px;
-    width: 52px;
-    height: 38px;
-    border-radius: 10px;
-    border: 1.5px solid var(--crystal-bd);
-    background: linear-gradient(180deg, var(--crystal-2), var(--crystal-1));
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.10),
-      0 2px 6px rgba(0, 0, 0, 0.45);
-    color: var(--gold-cream);
-    cursor: pointer;
-    padding: 0;
-    transition: filter 0.12s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
-  }
-
-  .feat-chip:hover:not(:disabled) {
-    filter: brightness(1.25);
-    border-color: var(--gold-edge);
-    color: var(--gold-bright);
-  }
-
-  .feat-chip:active:not(:disabled) { filter: brightness(0.85); transform: scale(0.96); }
-
-  .feat-chip.is-active {
-    border-color: rgba(0, 255, 153, 0.55);
-    color: var(--success);
+    gap: 3px;
+    width: 78px;
+    height: 78px;
+    border-radius: 16px;
+    border: 1.5px solid var(--gold-edge);
+    background:
+      radial-gradient(circle at 50% 30%, rgba(255, 210, 90, 0.14), transparent 65%),
+      linear-gradient(180deg, var(--crystal-2), var(--crystal-1));
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.12),
-      0 0 14px rgba(0, 255, 153, 0.28),
-      0 2px 6px rgba(0, 0, 0, 0.45);
+      0 0 16px rgba(255, 184, 0, 0.20),
+      0 3px 10px rgba(0, 0, 0, 0.5);
+    color: var(--gold-bright);
+    cursor: pointer;
+    padding: 0;
+    position: relative;
+    transition: filter 0.12s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.12s;
   }
 
-  .feat-chip.is-disabled,
-  .feat-chip:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
+  .bonus-main:hover:not(:disabled) {
+    filter: brightness(1.2);
+    border-color: var(--gold-bright);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 0 24px rgba(255, 184, 0, 0.36),
+      0 3px 12px rgba(0, 0, 0, 0.5);
   }
 
-  .chip-icon {
-    font-size: 0.78rem;
-    line-height: 1;
+  .bonus-main:active:not(:disabled) { filter: brightness(0.9); transform: scale(0.97); }
+
+  .bonus-main.menu-open {
+    border-color: var(--gold-bright);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 0 26px rgba(255, 184, 0, 0.42),
+      0 3px 12px rgba(0, 0, 0, 0.5);
   }
 
-  .chip-label {
+  .bonus-main.has-active {
+    border-color: rgba(0, 255, 153, 0.6);
+  }
+
+  .bonus-main-icon { font-size: 1.5rem; line-height: 1; }
+
+  .bonus-main-label {
     font-family: 'Outfit', sans-serif;
-    font-size: 0.38rem;
+    font-size: 0.5rem;
     font-weight: 900;
     letter-spacing: 0.22em;
     text-transform: uppercase;
@@ -607,14 +690,98 @@
     color: inherit;
   }
 
-  .chip-sub {
-    font-size: 0.32rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    color: rgba(255, 215, 0, 0.65);
+  .bonus-main-dot {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 8px rgba(0, 255, 153, 0.8);
+  }
+
+  /* Popover just above the BONUS button */
+  .bonus-menu {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: 232px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 14px;
+    border: 1px solid var(--gold-edge);
+    background: linear-gradient(180deg, rgba(14, 18, 40, 0.98), rgba(6, 9, 24, 0.98));
+    box-shadow:
+      0 12px 34px rgba(0, 0, 0, 0.7),
+      0 0 22px rgba(255, 184, 0, 0.14);
+    z-index: 40;
+  }
+
+  .bonus-menu::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 7px solid transparent;
+    border-top-color: rgba(8, 11, 28, 0.98);
+  }
+
+  .bonus-opt {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--crystal-bd);
+    background: linear-gradient(180deg, var(--crystal-2), var(--crystal-1));
+    color: var(--gold-cream);
+    cursor: pointer;
+    text-align: left;
+    transition: filter 0.12s, border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .bonus-opt:hover:not(.is-disabled) {
+    filter: brightness(1.2);
+    border-color: var(--gold-edge);
+  }
+
+  .bonus-opt:active:not(.is-disabled) { filter: brightness(0.88); }
+
+  .bonus-opt.is-active {
+    border-color: rgba(0, 255, 153, 0.55);
+    box-shadow: inset 0 0 12px rgba(0, 255, 153, 0.18);
+  }
+
+  .bonus-opt.is-disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .opt-icon { font-size: 1.1rem; line-height: 1; flex-shrink: 0; }
+
+  .opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+  .opt-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
     line-height: 1;
+    color: var(--gold-bright);
+  }
+
+  .bonus-opt.is-active .opt-title { color: var(--success); }
+
+  .opt-sub {
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.1;
+    color: rgba(255, 241, 163, 0.6);
     white-space: nowrap;
-    max-width: 48px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -639,7 +806,20 @@
   }
 
   .win-amt  { color: #00ff88; font-size: 1.35rem; font-weight: 700; letter-spacing: 0.04em; }
-  .win-mult { color: #ffd700; font-size: 0.85rem; opacity: 0.9; }
+  .win-mega {
+    color: #ffe27a;
+    font-size: 0.7rem;
+    font-weight: 900;
+    letter-spacing: 0.28em;
+    text-shadow: 0 0 12px rgba(255, 210, 90, 0.9);
+  }
+  .win-toast--mega {
+    border-color: #ffe27a;
+    flex-direction: column;
+    gap: 2px;
+    align-items: center;
+  }
+  .win-toast--mega .win-amt { color: #ffe27a; }
 
   /* ── Bonus buy alert pill ──────────────────────────────────────────────── */
   .bb-alert {
@@ -740,21 +920,10 @@
     animation: none;
   }
 
-  .state-hit .btn-face {
-    background: radial-gradient(circle at 36% 28%,
-      var(--gold-cream) 0%, var(--gold-bright) 30%, var(--gold) 55%, #4a2800 100%);
-    animation: hit-pulse 0.55s ease-in-out infinite;
-  }
-
   .state-locked .btn-face {
     background: radial-gradient(circle at 50% 50%, #1a1e2c, #07090f);
     box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.7), 0 4px 12px rgba(0, 0, 0, 0.7);
     animation: none;
-  }
-
-  @keyframes hit-pulse {
-    0%, 100% { filter: brightness(1); }
-    50%       { filter: brightness(1.25); }
   }
 
   /* Outer ring — gold bezel with intense glow */
@@ -775,11 +944,6 @@
   .state-cashout .btn-ring {
     border-color: rgba(0, 255, 153, 0.65);
     box-shadow: 0 0 30px rgba(0, 255, 153, 0.5), inset 0 0 12px rgba(0, 255, 153, 0.18);
-  }
-
-  .state-hit .btn-ring {
-    border-color: var(--gold-bright);
-    box-shadow: 0 0 34px rgba(255, 217, 90, 0.6), inset 0 0 14px rgba(255, 230, 100, 0.22);
   }
 
   .state-locked .btn-ring {
@@ -809,15 +973,6 @@
     text-shadow: 0 1px 0 rgba(255, 255, 255, 0.22);
   }
 
-  .btn-big {
-    font-family: 'Outfit', sans-serif;
-    font-size: 1.35rem;
-    font-weight: 900;
-    color: rgba(0, 0, 0, 0.72);
-    letter-spacing: 0.04em;
-    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.22);
-  }
-
   .btn-payout {
     font-size: 0.6rem;
     font-weight: 700;
@@ -835,7 +990,7 @@
     .adj { width: 34px; height: 34px; }
     .bet-btn { width: 92px; height: 92px; }
     .auto-disc { width: 54px; height: 54px; }
-    .feat-chip { width: 46px; height: 34px; }
+    .bonus-main { width: 66px; height: 66px; }
   }
 
   @media (max-width: 540px) {

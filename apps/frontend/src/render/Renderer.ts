@@ -302,8 +302,8 @@ export class Renderer implements Renderable {
     this.snapshot = snap;
   }
 
-  updateScoreboard(ballIdx: number, totalBalls: number, multiplier: number): void {
-    this.stadium.updateScoreboard(ballIdx, totalBalls, multiplier);
+  updateScoreboard(winAmount: number, multiplier: number, currencySym: string): void {
+    this.stadium.updateScoreboard(winAmount, multiplier, currencySym);
   }
 
   render(): void {
@@ -442,10 +442,8 @@ export class Renderer implements Renderable {
     this.cam.update(this.snapshot, shake, this.impactJuice.zoomOffset);
     this._syncBatToHand();
 
-    // Bloom strength tied to current multiplier (entire arena brightens as tension rises).
-    const mult = this.snapshot.round.cumulative ?? 1;
-    const bloomT = Math.min(1, Math.max(0, (mult - 1) / 9));
-    this.bloomPass.strength = 0.22 + bloomT * 0.45;
+    // Constant, gentle bloom — no multiplier-reactive brightening/coloring of the arena.
+    this.bloomPass.strength = 0.22;
 
     this.composer.render();
   }

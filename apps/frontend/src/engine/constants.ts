@@ -79,9 +79,9 @@ export const TIMING = {
 // ── Bowl speeds (seconds for ball to reach batsman) ───────────────────────────
 
 export const HIT_TIMES: Record<'fast' | 'spin' | 'swing', number> = {
-  fast:  1.1,
-  spin:  2.0,
-  swing: 1.5,
+  fast:  0.9,
+  spin:  1.5,
+  swing: 1.2,
 };
 
 // ── Camera ────────────────────────────────────────────────────────────────────

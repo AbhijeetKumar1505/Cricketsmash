@@ -4,11 +4,23 @@
    * Premium, high-impact broadcast-style multiplier display.
    * Part of the Doodle Cricket / Cricket Crash stadium HUD.
    */
+  import { game } from "../../core/gameController.svelte.js";
+
   let { value = 1, status = "waiting", pulseKey = 0 } = $props<{
     value: number;
     status: "waiting" | "bowling" | "hitting" | "result" | "wicket";
     pulseKey?: number;
   }>();
+
+  const CURRENCY_SYMBOLS: Record<string, string> = {
+    USD: "$", EUR: "€", GBP: "£", INR: "₹", CAD: "CA$", AUD: "A$",
+    JPY: "¥", BRL: "R$", BTC: "₿", ETH: "Ξ",
+  };
+  const currSymbol = $derived(CURRENCY_SYMBOLS[game.currency] ?? game.currency);
+
+  // Winning amount only — no multipliers, no negatives.
+  const winAmount = $derived(Math.max(0, game.betAmount * Math.max(0, value)));
+  const isMega = $derived(status !== "wicket" && value > 3);
 
   // Reactive color spectrum based on multiplier magnitude
   const multiplierColor = $derived(
@@ -48,7 +60,7 @@
   );
 
   // Formatting for the display
-  const formattedValue = $derived(value.toFixed(2));
+  const formattedValue = $derived(winAmount.toFixed(2));
 </script>
 
 <div 
@@ -56,16 +68,19 @@
   class:crashed={status === "wicket"}
 >
   <div class="multiplier-shell" class:counter-punch={pulseKey > 0}>
-    <div 
+    {#if isMega}
+      <div class="mega-banner">MEGA WIN</div>
+    {/if}
+    <div
       class="multiplier-text {glowClass} font-headline tabular-nums"
       style="color: {multiplierColor}; --accent-rgb: {multiplierRgb};"
     >
-      {formattedValue}<span class="multiplier-x">x</span>
+      <span class="multiplier-cur">{currSymbol}</span>{formattedValue}
     </div>
   </div>
-  
+
   <div class="multiplier-label font-label">
-    CURRENT PAYOUT
+    {isMega ? "MEGA WIN" : "YOU WIN"}
   </div>
 </div>
 
@@ -98,11 +113,31 @@
     animation: num-bounce-subtle 2s ease-in-out infinite;
   }
 
-  .multiplier-x {
-    font-size: 2.5rem;
-    opacity: 0.6;
-    margin-left: 2px;
+  .multiplier-cur {
+    font-size: 2.8rem;
+    opacity: 0.7;
+    margin-right: 2px;
     letter-spacing: normal;
+  }
+
+  .mega-banner {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 900;
+    letter-spacing: 0.32em;
+    text-align: center;
+    color: #ffe27a;
+    text-shadow:
+      0 0 18px rgba(255, 210, 90, 0.95),
+      0 0 44px rgba(255, 184, 0, 0.6);
+    margin-bottom: 0.1rem;
+    animation: mega-pop 0.5s ease-out;
+  }
+
+  @keyframes mega-pop {
+    0%   { transform: scale(0.6); opacity: 0; }
+    60%  { transform: scale(1.12); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
   }
 
   .multiplier-label {
@@ -146,8 +181,8 @@
     .multiplier-text {
       font-size: 3.4rem;
     }
-    .multiplier-x {
-      font-size: 1.8rem;
+    .multiplier-cur {
+      font-size: 2rem;
     }
   }
 </style>

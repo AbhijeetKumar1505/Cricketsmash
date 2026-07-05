@@ -2,6 +2,7 @@
   import { game } from '../../core/gameController.svelte.js';
   import { navigationState } from '../../core/navigation.svelte.js';
   import GlbThumbnail from './GlbThumbnail.svelte';
+  import HistoryBar from './HistoryBar.svelte';
   import type { PlayerId } from '../../game/CharacterManager.js';
 
   let { multiplier = 1 } = $props<{ multiplier?: number }>();
@@ -32,11 +33,10 @@
     document.documentElement.style.setProperty('--ui-intensity', intensity.toFixed(3));
   });
 
-  const potentialPayout = $derived(
-    game.betActive && game.betAmount > 0
-      ? (game.betAmount * multiplier).toFixed(2)
-      : null
-  );
+  // Winning amount only — no multipliers, no negatives.
+  const showWin = $derived(game.betActive && game.betAmount > 0);
+  const winAmount = $derived(Math.max(0, game.betAmount * Math.max(0, multiplier)));
+  const isMega = $derived(showWin && !isCrashed && multiplier > 3);
 
   const currSymbol = $derived(
     game.currency === 'USD' ? '$' :
@@ -103,31 +103,31 @@
       <span class="zone-tag">BOWLER</span>
     </div>
 
-    <!-- Multiplier orb -->
-    <div class="mult-orb" class:is-crashed={isCrashed} style="--mc:{multColor}; --mr:{multRgb}">
+    <!-- Win orb — winning amount only, no multipliers -->
+    <div class="mult-orb" class:is-crashed={isCrashed} class:is-mega={isMega} style="--mc:{multColor}; --mr:{multRgb}">
       <div class="mult-glow" aria-hidden="true"></div>
-      <span class="mult-label">MULTIPLIER</span>
+      <span class="mult-label">{isMega ? 'MEGA WIN' : 'WIN'}</span>
       <span class="mult-val" aria-live="polite">
-        {multiplier.toFixed(2)}<span class="mult-x">x</span>
+        {#if showWin}<span class="mult-cur">{currSymbol}</span>{winAmount.toFixed(2)}{:else}<span class="mult-idle">Place a bet</span>{/if}
       </span>
       {#if isCrashed}
         <div class="mult-burst" aria-hidden="true"></div>
       {/if}
     </div>
 
-    <!-- Payout row -->
+    <!-- Stake row -->
     <div class="payout-row">
-      <span class="payout-key">POTENTIAL WIN</span>
-      {#if potentialPayout}
-        <span class="payout-val" aria-live="polite">{currSymbol}{potentialPayout}</span>
+      <span class="payout-key">STAKE</span>
+      {#if showWin}
+        <span class="payout-val" aria-live="polite">{currSymbol}{game.betAmount.toFixed(2)}</span>
       {:else}
         <span class="payout-empty">PLACE A BET</span>
       {/if}
     </div>
 
-    <!-- Risk bar -->
+    <!-- Skill bar -->
     <div class="risk-row">
-      <span class="risk-key">RISK</span>
+      <span class="risk-key">SKILL</span>
       <div class="risk-bar-track">
         <div
           class="risk-bar-fill"
@@ -135,6 +135,11 @@
         ></div>
       </div>
       <span class="risk-val" style="color:{riskColor}">{riskLabel}</span>
+    </div>
+
+    <!-- Recent results -->
+    <div class="results-row">
+      <HistoryBar items={game.recentResults} />
     </div>
 
   </div>
@@ -300,7 +305,7 @@
 
   .mult-val {
     font-family: 'Outfit', sans-serif;
-    font-size: clamp(2.4rem, 5.2vw, 3.2rem);
+    font-size: clamp(1.9rem, 4.4vw, 2.7rem);
     font-weight: 900;
     letter-spacing: -0.04em;
     line-height: 1;
@@ -317,11 +322,31 @@
     z-index: 1;
   }
 
-  .mult-x {
-    font-size: 0.48em;
-    opacity: 0.55;
+  .mult-cur {
+    font-size: 0.56em;
+    opacity: 0.7;
     font-weight: 900;
-    margin-left: 3px;
+    margin-right: 2px;
+  }
+
+  .mult-idle {
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 241, 163, 0.42);
+    text-shadow: none;
+  }
+
+  .mult-orb.is-mega .mult-label {
+    color: #ffe27a;
+    text-shadow: 0 0 14px rgba(255, 210, 90, 0.9);
+    animation: mega-flicker 1.1s ease-in-out infinite;
+  }
+
+  @keyframes mega-flicker {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.7; }
   }
 
   .mult-orb.is-crashed .mult-val {
@@ -428,6 +453,16 @@
     width: 42px;
     text-align: right;
     transition: color 0.4s;
+  }
+
+  /* Recent results strip */
+  .results-row {
+    display: flex;
+    justify-content: center;
+    padding: 8px 10px 4px;
+  }
+  .results-row :global(.glass-panel) {
+    width: 100%;
   }
 
   /* ── Zone divider ──────────────────────────────────────────────────────────── */

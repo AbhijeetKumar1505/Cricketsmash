@@ -111,7 +111,9 @@ export class Camera {
       this._swingTighten = Math.max(0, this._swingTighten - dt * 0.5);
     }
 
-    const totalZoom = this._zoomPunch + this._contactZoom + this._swingTighten;
+    // Camera zoom-in on hit removed — hold the broadcast framing (no punch,
+    // no swing tighten, no contact zoom). Wicket zoom keeps its own path below.
+    const totalZoom = 0;
 
     // Determine target mode based on snapshot phase
     if (snap.round.outcome === 'hit' && snap.phase === 'celebrate') {
@@ -130,12 +132,9 @@ export class Camera {
       this.three.position.lerp(new THREE.Vector3(targetX, 4, targetZ), 0.05);
       this.three.lookAt(0, 1.2, -2);
     } else if (this._mode === 'tracking') {
-      const targetPos = new THREE.Vector3(
-        snap.ball.x * 0.3,
-        3.5 + snap.ball.y * 0.1,
-        snap.ball.z + 8.5,
-      );
-      this.three.position.lerp(targetPos, 0.08);
+      // Follow the ball with the gaze only — hold broadcast distance so the
+      // camera does not dolly/zoom in toward the ball during the hit.
+      this.three.position.lerp(PRESETS.broadcast.pos, 0.06);
       this.three.lookAt(snap.ball.x, snap.ball.y, snap.ball.z);
     } else {
       if (this._wicketTimer >= 0) {

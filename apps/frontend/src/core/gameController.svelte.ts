@@ -235,10 +235,10 @@ function interBallResultDelayMs(): number {
   const notable = isNotableResult();
   switch (game.autobetSpeed) {
     case 0: return notable ? 4500 : 2000;   // slow — appreciate the result
-    case 1: return notable ? 3500 : 1200;   // normal (previous default)
+    case 1: return notable ? 2400 :  700;   // normal (snappier default)
     case 2: return notable ? 1200 :  500;   // fast
     case 3: return 300;                     // turbo
-    default: return notable ? 3500 : 1200;
+    default: return notable ? 2400 :  700;
   }
 }
 
@@ -246,11 +246,26 @@ function broadcastWaitMs(): number {
   const notable = isNotableResult();
   switch (game.autobetSpeed) {
     case 0: return notable ? 3600 : 1600;
-    case 1: return notable ? 3200 :  800;
+    case 1: return notable ? 2000 :  500;
     case 2: return notable ? 1200 :  500;
     case 3: return 350;
-    default: return notable ? 3200 : 800;
+    default: return notable ? 2000 : 500;
   }
+}
+
+const SCOREBOARD_CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', EUR: '€', GBP: '£', INR: '₹', CAD: 'CA$', AUD: 'A$',
+  JPY: '¥', BRL: 'R$', BTC: '₿', ETH: 'Ξ',
+};
+/** Symbol for the active currency, used by the 3D scoreboard. */
+function currencySym(): string {
+  return SCOREBOARD_CURRENCY_SYMBOLS[game.currency] ?? game.currency;
+}
+
+/** Push the current win amount (money-only) to the 3D stadium scoreboard. */
+function pushScoreboard(): void {
+  const mult = game.displayMultiplier * game.bonusProfitMultProduct;
+  _bridge?.updateScoreboard(game.betAmount * Math.max(0, mult), mult, currencySym());
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -445,7 +460,7 @@ function setupBridgeCallbacks() {
       game.isSwinging  = false;
       game.activeSkyObject = null;
 
-      _bridge?.updateScoreboard(0, 1, game.displayMultiplier * game.bonusProfitMultProduct);
+      pushScoreboard();
 
       const delivery = _activeBowlDelivery;
       if (delivery?.outcome.kind !== 'wicket') {
@@ -539,7 +554,7 @@ function setupBridgeCallbacks() {
         }
       }
 
-      _bridge?.updateScoreboard(0, 1, game.displayMultiplier * game.bonusProfitMultProduct);
+      pushScoreboard();
 
       const isWicket = delivery ? delivery.outcome.kind === 'wicket'
         : (_outcome === 'wicket' || _mult === 0);

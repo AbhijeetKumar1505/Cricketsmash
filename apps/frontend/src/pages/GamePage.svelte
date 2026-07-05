@@ -4,11 +4,10 @@
     placeBet,
     cashout,
     getEffectiveTicketMultiplier,
-    swing,
     type VisualPhase,
     type DeliveryOutcome,
   } from '../core/gameController.svelte.js';
-  import { navigationState } from '../core/navigation.svelte.js';
+  import { navigationState, openOverlay } from '../core/navigation.svelte.js';
   import CricketSimulation from '../lib/CricketSimulation.svelte';
   import GameArena from '../lib/GameArena.svelte';
   import {
@@ -28,7 +27,6 @@
   } from '../lib/gameAudio';
   import BetPanel from '../lib/ui/bet/BetPanel.svelte';
   import GameInfoPanel from '../lib/ui/GameInfoPanel.svelte';
-  import TopHUD from '../lib/ui/TopHUD.svelte';
   import RightPanel from '../lib/ui/RightPanel.svelte';
   import CharacterOverlay from '../lib/ui/overlays/CharacterOverlay.svelte';
   import DifficultyOverlay from '../lib/ui/overlays/DifficultyOverlay.svelte';
@@ -62,6 +60,17 @@
   let passedPageMilestones = new Set<number>();
   let showInfoPanel = $state(false);
 
+  // ─── Corner menu (relocated header controls) ───
+  let menuOpen = $state(false);
+  function toggleMenu(e: MouseEvent) {
+    e.stopPropagation();
+    menuOpen = !menuOpen;
+    playBlip(menuOpen ? 560 : 360, 0.05);
+  }
+  function menuInfo()     { showInfoPanel = true;              menuOpen = false; }
+  function menuSettings() { openOverlay('settings');           menuOpen = false; }
+  function menuSound()    { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); menuOpen = false; }
+
   // ─── Locale detection ───
   const locale = $derived.by(() => {
     const lang = navigator.language?.slice(0, 2) ?? 'en';
@@ -82,10 +91,7 @@
 
     if (e.code === 'Space') {
       e.preventDefault();
-      if (game.visualPhase === 'bowl') {
-        swing();
-        return;
-      }
+      // Swing is autonomous; Space only places a bet or cashes out.
       handleMainAction();
     }
   }
@@ -256,7 +262,11 @@
   }));
 </script>
 
-<svelte:window onkeydown={handleGlobalKeydown} onresize={handleResize} />
+<svelte:window
+  onkeydown={handleGlobalKeydown}
+  onresize={handleResize}
+  onclick={() => { if (menuOpen) menuOpen = false; }}
+/>
 
 <div
   class="page"
@@ -269,17 +279,7 @@
     <div class="vignette"></div>
   </div>
 
-  <!-- ─── TopHUD row ─── -->
-  <div class="topbar-cell">
-    <TopHUD
-      bind:soundOn
-      onMuteToggle={() => { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); }}
-      multiplier={mult}
-      onInfo={() => { showInfoPanel = true; }}
-    />
-  </div>
-
-  <!-- ─── Arena row (fills remaining height) ─── -->
+  <!-- ─── Arena (full-screen game) ─── -->
   <div class="arena-row">
     <GameArena
       arenaStatus={isBroadcast ? 'over_ended' : (game.visualPhase === 'celebrate' ? 'result' : game.visualPhase === 'bowl' ? 'bowling' : game.visualPhase === 'hit' ? 'hitting' : game.visualPhase === 'wicket' ? 'wicket' : 'waiting')}
@@ -313,22 +313,70 @@
         <div class="micro-comment" aria-hidden="true">{commentaryText}</div>
       {/if}
     </div>
+
+    <!-- Floating bet console (inside the game screen) + corner menu -->
+    <div class="bet-overlay">
+      <div class="menu-wrap">
+        <button
+          class="hamburger"
+          onclick={toggleMenu}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label="Menu"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+            <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+        {#if menuOpen}
+          <div class="menu-pop" role="menu">
+            <button class="menu-item" role="menuitem" onclick={menuInfo}>
+              <span class="mi-icon mi-i">i</span>
+              <span>Game Info</span>
+            </button>
+            <button class="menu-item" role="menuitem" onclick={menuSettings}>
+              <span class="mi-icon">
+                <svg viewBox="0 0 20 20" width="15" height="15" fill="none" aria-hidden="true">
+                  <circle cx="10" cy="10" r="2.8" stroke="currentColor" stroke-width="1.4"/>
+                  <path d="M10 2v1.5M10 16.5V18M2 10h1.5M16.5 10H18M4.04 4.04l1.06 1.06M14.9 14.9l1.06 1.06M4.04 15.96l1.06-1.06M14.9 5.1l1.06-1.06" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span>Settings</span>
+            </button>
+            <button class="menu-item" role="menuitem" onclick={menuSound}>
+              <span class="mi-icon">
+                {#if soundOn}
+                  <svg viewBox="0 0 20 18" width="15" height="15" fill="none" aria-hidden="true">
+                    <path d="M4 6H2a1 1 0 00-1 1v4a1 1 0 001 1h2l4 3V3L4 6z" fill="currentColor"/>
+                    <path d="M13 5.5a5 5 0 010 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                  </svg>
+                {:else}
+                  <svg viewBox="0 0 20 18" width="15" height="15" fill="none" aria-hidden="true">
+                    <path d="M4 6H2a1 1 0 00-1 1v4a1 1 0 001 1h2l4 3V3L4 6z" fill="currentColor" opacity="0.4"/>
+                    <line x1="13" y1="6" x2="18" y2="12" stroke="#ff4466" stroke-width="1.5" stroke-linecap="round"/>
+                    <line x1="18" y1="6" x2="13" y2="12" stroke="#ff4466" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                {/if}
+              </span>
+              <span>{soundOn ? 'Sound On' : 'Muted'}</span>
+            </button>
+          </div>
+        {/if}
+      </div>
+
+      <BetPanel
+        disabled={!canBet && !game.betActive}
+        {actionState}
+        onCashout={cashout}
+        payout={currentPayout}
+        onMainAction={handleMainAction}
+      />
+    </div>
   </div>
 
   <!-- ─── Right panel ─── -->
   <div class="right-cell">
     <RightPanel multiplier={mult} />
-  </div>
-
-  <!-- ─── BetPanel row ─── -->
-  <div class="bet-row">
-    <BetPanel
-      disabled={!canBet && !game.betActive}
-      {actionState}
-      onCashout={cashout}
-      payout={currentPayout}
-      onMainAction={handleMainAction}
-    />
   </div>
 
   <!-- ─── Info panel and dialog (modal, above everything) ─── -->
@@ -374,20 +422,12 @@
     inset: 0;
     display: grid;
     grid-template-columns: 1fr 260px;
-    grid-template-rows: 72px 1fr 110px;
-    grid-template-areas:
-      "topbar   topbar"
-      "arena    right"
-      "betpanel betpanel";
+    grid-template-rows: 1fr;
+    grid-template-areas: "arena right";
     overflow: hidden;
     background: var(--bg-deep);
     --accent: #6366f1;
     --accent-rgb: 99,102,241;
-  }
-
-  .topbar-cell {
-    grid-area: topbar;
-    min-width: 0;
   }
 
   .right-cell {
@@ -442,12 +482,12 @@
     z-index: 45;
   }
 
-  /* Floating notifications at the bottom of the arena */
+  /* Floating notifications — sit above the floating bet console */
   .arena-float {
     position: absolute;
     left: 8px;
     right: 8px;
-    bottom: 6px;
+    bottom: 128px;
     z-index: 35;
     display: flex;
     flex-direction: column;
@@ -457,16 +497,115 @@
     filter: drop-shadow(0 10px 28px rgba(0, 0, 0, 0.45));
   }
 
-  /* ─── Bet row ─── */
-  .bet-row {
-    grid-area: betpanel;
-    z-index: 20;
-    padding: 6px 12px;
+  /* ─── Floating bet console (inside the game screen) ─── */
+  .bet-overlay {
+    position: absolute;
+    left: 50%;
+    bottom: 14px;
+    transform: translateX(-50%);
+    z-index: 40;
+    width: calc(100% - 24px);
+    max-width: 1140px;
     display: flex;
+    align-items: center;
     justify-content: center;
-    align-items: stretch;
-    border-top: 1px solid rgba(255, 184, 0, 0.10);
-    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.55), 0 -1px 0 rgba(255, 184, 0, 0.07);
+    gap: 10px;
+  }
+
+  /* Corner menu (relocated header controls) */
+  .menu-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .hamburger {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    border: 1px solid var(--gold-edge, rgba(200,160,80,0.4));
+    background: linear-gradient(180deg, rgba(28,32,60,0.92), rgba(10,13,30,0.92));
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.10),
+      0 4px 14px rgba(0,0,0,0.55);
+    color: var(--gold-bright, #ffc800);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: filter 0.14s, border-color 0.16s, box-shadow 0.16s;
+  }
+  .hamburger:hover { filter: brightness(1.18); border-color: var(--gold-bright, #ffc800); }
+  .hamburger:active { filter: brightness(0.9); transform: scale(0.96); }
+
+  .menu-pop {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 0;
+    min-width: 168px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 7px;
+    border-radius: 14px;
+    border: 1px solid var(--gold-edge, rgba(200,160,80,0.4));
+    background: linear-gradient(180deg, rgba(14,18,40,0.98), rgba(6,9,24,0.98));
+    box-shadow: 0 12px 34px rgba(0,0,0,0.7), 0 0 22px rgba(255,184,0,0.12);
+    z-index: 50;
+    animation: menu-rise 0.16s ease-out;
+  }
+
+  @keyframes menu-rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 11px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: rgba(255, 241, 205, 0.85);
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.14s, border-color 0.14s, color 0.14s;
+  }
+  .menu-item:hover {
+    background: rgba(255, 184, 0, 0.10);
+    border-color: var(--gold-edge, rgba(200,160,80,0.4));
+    color: var(--gold-bright, #ffc800);
+  }
+
+  .mi-icon {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    color: var(--gold-bright, #ffc800);
+  }
+  .mi-i {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  @media (max-width: 900px) {
+    .bet-overlay { max-width: none; }
+  }
+  @media (max-width: 540px) {
+    .hamburger { width: 46px; height: 46px; }
+    .bet-overlay { gap: 6px; bottom: 8px; }
   }
 
   /* ─── Floating UI ─── */
@@ -539,21 +678,7 @@
     .right-cell { display: none; }
     .page {
       grid-template-columns: 1fr;
-      grid-template-areas:
-        "topbar"
-        "arena"
-        "betpanel";
-    }
-  }
-
-  @media (max-width: 540px) {
-    .page {
-      grid-template-rows: 60px 1fr 140px;
-      grid-template-columns: 1fr;
-      grid-template-areas:
-        "topbar"
-        "arena"
-        "betpanel";
+      grid-template-areas: "arena";
     }
   }
 </style>
