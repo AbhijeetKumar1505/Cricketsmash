@@ -6,37 +6,30 @@
 import type { StakeGameClient, AuthResult, PlayResult, GameModeName } from './stakeClient.js';
 import type { Balance, AuthenticateConfig, JurisdictionFlags, Round } from 'stake-engine';
 import type { MathOutcomeKey, SkyObjectType } from '@cricket-crash/fairness';
-import {
-  pickWeighted,
-  profileForMode,
-} from './mathModel.js';
+import { profileForMode } from './mathModel.js';
+import { difficultyEngine } from '../game/DifficultyEngine.js';
 
 const MOCK_CURRENCY = 'USD' as const;
 // Bet levels in micro-units (1_000_000 = $1.00)
 const MOCK_BET_LEVELS = [1_000_000, 5_000_000, 10_000_000, 25_000_000, 50_000_000, 100_000_000, 500_000_000];
 
-// Generate a round payoutMultiplier from the economic table.
-// Step 1: decide win/wicket from the full profile (preserves correct catch_out weight).
-// Step 2: if win, pick a non-zero outcome from the positive-only profile for the
-//         base multiplier, then optionally apply a sky event override.
-// This gives ~95% RTP for OVER mode (STANDARD_PROFILE) with ~15% wicket rate.
+// Generate a round payoutMultiplier from the skill-based branching model
+// (see `DifficultyEngine.samplePayoutMultiplier`). The current batsman/difficulty
+// shapes the score branch; RTP is house-edged and graduated by skill.
+// A sky event can still override — but only on a scoring ball, so a no-score
+// (0 wicket / 0.9 dot) is never turned into a big win.
 function randomPayoutMultiplier(mode: GameModeName): number {
-  const profile = profileForMode(mode);
+  let mult = difficultyEngine.samplePayoutMultiplier(Math.random);
 
-  // Single draw from full profile decides wicket vs win (respects catch_out weight).
-  const roundPick = pickWeighted(profile.outcomes, (o) => o.weight, Math.random);
-  if (roundPick.key === 'catch_out') return 0;
-
-  // Win: use the selected outcome's multiplier as the round payout.
-  let mult = roundPick.multiplier;
-
-  // Sky event overrides the base multiplier (chance matches spec table).
-  if (Math.random() < profile.sky.chance) {
-    const skyW = profile.sky.weights;
-    const skyRoll = Math.random();
-    mult = skyRoll < skyW.bigPlane
-      ? profile.sky.multipliers.bigPlane
-      : profile.sky.multipliers.jetpack;
+  if (mult >= 1.05) {
+    const profile = profileForMode(mode);
+    if (Math.random() < profile.sky.chance) {
+      const skyW = profile.sky.weights;
+      const skyRoll = Math.random();
+      mult = skyRoll < skyW.bigPlane
+        ? profile.sky.multipliers.bigPlane
+        : profile.sky.multipliers.jetpack;
+    }
   }
 
   return Number(mult.toFixed(2));

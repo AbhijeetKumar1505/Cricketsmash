@@ -24,6 +24,8 @@
     startTensionHum,
     updateTensionPitch,
     stopTensionHum,
+    setMuted,
+    startBackgroundMusic,
   } from '../lib/gameAudio';
   import BetPanel from '../lib/ui/bet/BetPanel.svelte';
   import GameInfoPanel from '../lib/ui/GameInfoPanel.svelte';
@@ -69,7 +71,10 @@
   }
   function menuInfo()     { showInfoPanel = true;              menuOpen = false; }
   function menuSettings() { openOverlay('settings');           menuOpen = false; }
-  function menuSound()    { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); menuOpen = false; }
+  function menuSound()    { soundOn = !soundOn; if (soundOn) playBlip(440, 0.05); menuOpen = false; }
+
+  // Keep the global audio mute in sync with the sound toggle (mutes SFX + music).
+  $effect(() => { setMuted(!soundOn); });
 
   // ─── Locale detection ───
   const locale = $derived.by(() => {
@@ -137,21 +142,6 @@
     return (['DOT BALL.', 'WELL DEFENDED!', 'TIGHT BOWLING!'] as const)[seed % 3]!;
   });
 
-  // ─── Scorecard ───
-  const scorecardData = $derived.by(() => {
-    if (game.phase !== 'broadcast') return null;
-    if (!game.showResultCard) return null;
-    const mult_val = game.lastSettledMultiplier > 0 ? game.lastSettledMultiplier : getEffectiveTicketMultiplier();
-    const bet = game.lastSettledBetAmount > 0 ? game.lastSettledBetAmount : game.betAmount;
-    const payout = game.lastSettledPayout > 0 ? game.lastSettledPayout : bet * mult_val;
-    const wasWicket = game.overSummary.some(s => s?.kind === 'wicket');
-    return {
-      multiplier: mult_val,
-      betAmount:  bet,
-      profit:     mult_val > 0 ? payout - bet : -bet,
-      wasWicket,
-    };
-  });
 
   // ─── CSS accent color reactivity ───
   const accentColor = $derived(
@@ -260,6 +250,19 @@
     // Heavy hits get crowd burst in sync with impact
     if (intensity >= 0.7) playCrowdShout(intensity);
   }));
+
+  // Looping background music — browsers block autoplay until a user gesture, so
+  // try immediately and again on the first interaction.
+  onMount(() => {
+    const kick = () => startBackgroundMusic();
+    startBackgroundMusic();
+    window.addEventListener('pointerdown', kick, { once: true });
+    window.addEventListener('keydown', kick, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', kick);
+      window.removeEventListener('keydown', kick);
+    };
+  });
 </script>
 
 <svelte:window
@@ -289,7 +292,6 @@
       {streak}
       rewardToast={game.pendingRewardToast}
       skyHitToast={game.skyHitToast}
-      {scorecardData}
       isSpecialResult={isSpecialDelivery}
       resultStage1HoldMs={game.turboPlay || game.autoPlayOn ? 400 : 1400}
     >
@@ -398,7 +400,7 @@
   {:else if navigationState.activeOverlay === 'settings'}
     <SettingsOverlay
       bind:soundOn
-      onSoundToggle={() => { soundOn = !soundOn; playBlip(soundOn ? 440 : 220, 0.05); }}
+      onSoundToggle={() => { soundOn = !soundOn; if (soundOn) playBlip(440, 0.05); }}
     />
   {:else if navigationState.activeOverlay === 'autobet'}
     <AutobetOverlay />

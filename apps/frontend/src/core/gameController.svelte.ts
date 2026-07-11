@@ -33,7 +33,7 @@ import {
 import type { BowlerType } from '../engine/physics/ballTrajectory.js';
 import { ParseAmount, API_MULTIPLIER, GAME_MODES } from './stakeClient.js';
 import type { DecomposeTelemetryEvent } from '@cricket-crash/fairness';
-import { generateDeliveries, applyGodModeOverrides, type Delivery } from './modeEngine.js';
+import { generateDeliveries, type Delivery } from './modeEngine.js';
 import type { SkyObjectType } from '../engine/sky/types.js';
 import { getForcedDecomposeOptions } from './devMock.js';
 
@@ -152,6 +152,8 @@ export const game = $state({
 
   // ── Bonus Buy ─────────────────────────────────────────────────────────────
   bonusBuyAvailable: true,
+  /** Armed by the Bonus Buy button; the NEXT placeBet() plays a bonus round. */
+  bonusBuyArmed: false,
   /** 30% surcharge deducted locally when bonus buy is initiated */
   bonusBuyCost: 0,
   /** Error message shown when bonus buy button is clicked but blocked */
@@ -331,6 +333,18 @@ export async function placeBet(): Promise<void> {
   if (game.betActive) return;
   game.betActive = true;  // lock before any await — prevents concurrent placeBet() calls
 
+  // Consume a pending bonus-buy arm: charge the surcharge and flag the round as a
+  // bonus round so the skill sampler uses the enhanced score branch.
+  const isBonusRound = game.bonusBuyArmed;
+  game.bonusBuyArmed = false;
+  if (isBonusRound) {
+    const surcharge = game.betAmount * 0.30;
+    game.bonusBuyCost = surcharge;
+    game.balance = Math.max(0, game.balance - surcharge);
+    difficultyEngine.armBonusRound();
+    gameBus.emit('BONUS_BUY_STARTED', { betAmount: game.betAmount });
+  }
+
   recordMissionEvent({ kind: 'bet' });
 
   const apiAmount = Math.round(game.betAmount * API_MULTIPLIER);
@@ -370,9 +384,8 @@ export async function placeBet(): Promise<void> {
       );
     }
 
-    if (game.difficulty === 'god') {
-      newSeq = applyGodModeOverrides(newSeq);
-    }
+    // God mode (6-or-wicket) is now produced by the skill-based sampler in
+    // DifficultyEngine, so no post-hoc override is needed here.
 
     game.currentDeliveries = newSeq;
     game.overSummary = [null];
@@ -558,17 +571,19 @@ function setupBridgeCallbacks() {
 
       const isWicket = delivery ? delivery.outcome.kind === 'wicket'
         : (_outcome === 'wicket' || _mult === 0);
+
+      // Small return toast (money-only) shown for every ball: the win amount, the
+      // near-push dot return, or $0.00 on a wicket (rendered neutrally — no red).
+      const returnMult = isWicket ? 0 : (delivery ? delivery.endMultiplier : Math.max(0, _mult));
+      const returnAmount = game.betAmount * Math.max(0, returnMult);
+      const toastKey = Date.now();
+      game.winToast = { amount: returnAmount, multiplier: returnMult, key: toastKey };
+      setTimeout(() => {
+        if (game.winToast?.key === toastKey) game.winToast = null;
+      }, 2800);
+
       if (!isWicket) {
         game.visualPhase = 'celebrate';
-        // Show win amount toast above bet panel
-        if (delivery && delivery.outcome.kind === 'runs' && delivery.outcome.runs > 0) {
-          const winAmount = game.betAmount * delivery.endMultiplier;
-          const toastKey = Date.now();
-          game.winToast = { amount: winAmount, multiplier: delivery.endMultiplier, key: toastKey };
-          setTimeout(() => {
-            if (game.winToast?.key === toastKey) game.winToast = null;
-          }, 2800);
-        }
         setTimeout(advanceBall, interBallResultDelayMs());
       }
     },
@@ -796,6 +811,7 @@ export function returnToIdle(): void {
   game.bonusStreak = 0;
   game.bonusProfitMultProduct = 1;
   game.bonusBuyCost = 0;
+  game.bonusBuyArmed = false;
   game.bonusBuyAlert = null;
   game.winToast = null;
   game.activeSkyObject = null;
@@ -966,22 +982,31 @@ export function deactivateInsurance(): void {
 
 // ── Bonus Buy API ────────────────────────────────────────────────────────────
 
-export async function placeBonusBuy(): Promise<void> {
-  if (!client) return;
+/**
+ * Arm (or disarm) a bonus-buy round. Does NOT start the bet — the surcharge is
+ * charged and the bonus round plays when the user next presses Place Bet.
+ */
+export function placeBonusBuy(): void {
   if (game.betActive || game.sessionActive) return;
+
+  // Toggle off if already armed.
+  if (game.bonusBuyArmed) {
+    game.bonusBuyArmed = false;
+    if (!game.insuranceActive) {
+      game.activeFielder = 'ronaldo';
+      gameBus.emit('FIELDER_SWAP', { from: 'kimjong', to: 'ronaldo', explosion: false });
+    }
+    return;
+  }
 
   const surcharge = game.betAmount * 0.30;
   if (game.balance < game.betAmount + surcharge) return;
 
-  game.bonusBuyCost = surcharge;
-  game.balance = Math.max(0, game.balance - surcharge);
-
-  // Swap fielder to Kim Jong (lazy) — keep current batsman unchanged
+  // Arm only — surcharge is deducted in placeBet() when the round actually starts.
+  game.bonusBuyArmed = true;
   game.activeFielder = 'kimjong';
   gameBus.emit('FIELDER_SWAP', { from: 'ronaldo', to: 'kimjong', explosion: false });
   gameBus.emit('BONUS_BUY_REQUESTED', { betAmount: game.betAmount });
-  await placeBet();
-  gameBus.emit('BONUS_BUY_STARTED', { betAmount: game.betAmount });
 }
 
 // Re-export for convenience

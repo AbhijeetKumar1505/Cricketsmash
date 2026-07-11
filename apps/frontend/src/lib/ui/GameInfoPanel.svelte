@@ -7,6 +7,7 @@
     CAP_OVER_TOTAL_MULTIPLIER,
     CAP_SINGLE_BALL_MULTIPLIER,
   } from '../../core/mathModel.js';
+  import { game, setBetAmount, nudgeBetAmount } from '../../core/gameController.svelte.js';
 
   let {
     open = false,
@@ -26,15 +27,30 @@
 
   const profile = $derived(paytableMode === 'bonus' ? BONUS_BUY_PROFILE : STANDARD_PROFILE);
 
-  const OUTCOME_META: Record<string, { icon: string; label: string; color: string }> = {
-    six:          { icon: '🏏', label: 'SIX',          color: '#00ff88' },
-    four:         { icon: '🏏', label: 'FOUR',         color: '#4ade80' },
-    triple:       { icon: '🏃', label: '3 RUNS',       color: '#fbbf24' },
-    double:       { icon: '🏃', label: '2 RUNS',       color: '#f59e0b' },
-    single:       { icon: '🏃', label: '1 RUN',        color: '#d97706' },
-    dot:          { icon: '⚫', label: 'DOT BALL',     color: 'rgba(255,255,255,0.4)' },
-    good_fielding:{ icon: '🧤', label: 'FIELDED',      color: 'rgba(255,255,255,0.3)' },
-    catch_out:    { icon: '❌', label: 'WICKET',       color: '#ff4455' },
+  // ── Bet amount (synced with the shared game store via setBetAmount) ──
+  const CURRENCY_SYMBOLS: Record<string, string> = {
+    USD: '$', EUR: '€', GBP: '£', INR: '₹', CAD: 'CA$', AUD: 'A$',
+    JPY: '¥', BRL: 'R$', BTC: '₿', ETH: 'Ξ',
+  };
+  const currSym = $derived(CURRENCY_SYMBOLS[game.currency] ?? game.currency);
+  /** Money return for a payout multiplier, based on the current bet. */
+  function money(mult: number): string {
+    return `${currSym}${(game.betAmount * Math.max(0, mult)).toFixed(2)}`;
+  }
+  function handleBetInput(e: Event) {
+    const v = parseFloat((e.target as HTMLInputElement).value);
+    if (Number.isFinite(v) && v > 0) setBetAmount(v);
+  }
+
+  const OUTCOME_META: Record<string, { label: string; color: string }> = {
+    six:          { label: 'SIX',      color: '#00ff88' },
+    four:         { label: 'FOUR',     color: '#4ade80' },
+    triple:       { label: '3 RUNS',   color: '#fbbf24' },
+    double:       { label: '2 RUNS',   color: '#f59e0b' },
+    single:       { label: '1 RUN',    color: '#d97706' },
+    dot:          { label: 'DOT BALL', color: 'rgba(255,255,255,0.4)' },
+    good_fielding:{ label: 'FIELDED',  color: 'rgba(255,255,255,0.3)' },
+    catch_out:    { label: 'WICKET',   color: '#ff4455' },
   };
 
   const streakEntries = Object.entries(STREAK_OVERRIDE_MULTIPLIERS)
@@ -65,7 +81,6 @@
       <!-- ── Header ── -->
       <div class="gi-header">
         <div class="gi-header-left">
-          <span class="gi-logo">🏏</span>
           <div>
             <div class="gi-title">Cricket Crash</div>
             <div class="gi-subtitle">Game Information</div>
@@ -83,10 +98,10 @@
             class:active={activeTab === tab}
             onclick={() => activeTab = tab}
           >
-            {#if tab === 'rules'}📖 HOW TO PLAY
-            {:else if tab === 'paytable'}📊 PAYTABLE
-            {:else if tab === 'features'}⚡ FEATURES
-            {:else}📋 LEGAL{/if}
+            {#if tab === 'rules'}HOW TO PLAY
+            {:else if tab === 'paytable'}PAYTABLE
+            {:else if tab === 'features'}FEATURES
+            {:else}LEGAL{/if}
           </button>
         {/each}
       </nav>
@@ -108,7 +123,7 @@
                 <div class="step-num">1</div>
                 <div class="step-body">
                   <div class="step-title">Place Your Bet</div>
-                  <div class="step-desc">Set your stake amount. Optionally activate <strong>Insurance</strong> or purchase a <strong>Bonus Buy</strong> before the over begins.</div>
+                  <div class="step-desc">Set your stake amount. Optionally activate <strong>Feature Spin</strong> or arm a <strong>Bonus Buy</strong> before the over begins.</div>
                 </div>
               </div>
               <div class="step">
@@ -137,15 +152,12 @@
             <div class="step-label" style="margin-top:18px;">SKY BONUSES</div>
             <div class="rules-note-card">
               <div class="rn-row">
-                <span class="rn-icon">🚀</span>
-                <div><strong>Jetpack / Small Plane</strong> — rare mid-delivery bonus that multiplies your current stake by <strong>10×</strong></div>
+                <div><strong>Jetpack / Small Plane</strong> — rare mid-delivery bonus that returns <strong>{money(10)}</strong> on your current stake</div>
               </div>
               <div class="rn-row">
-                <span class="rn-icon">🛩️</span>
-                <div><strong>Big Plane</strong> — extremely rare. Multiplies current stake by <strong>100×</strong></div>
+                <div><strong>Big Plane</strong> — extremely rare. Returns <strong>{money(100)}</strong> on your current stake</div>
               </div>
               <div class="rn-row">
-                <span class="rn-icon">⚡</span>
                 <div><strong>Bonus Buy mode</strong> increases sky contact chance to <strong>{(BONUS_BUY_PROFILE.sky.chance * 100).toFixed(0)}%</strong> per delivery (vs {(STANDARD_PROFILE.sky.chance * 100).toFixed(0)}% standard)</div>
               </div>
             </div>
@@ -153,8 +165,7 @@
             <div class="step-label" style="margin-top:18px;">BOUNDARY STREAKS</div>
             <div class="rules-note-card">
               <div class="rn-row">
-                <span class="rn-icon">🏏</span>
-                <div>Hit <strong>3 or more consecutive 4s or 6s</strong> to trigger the hat-trick streak bonus. Multiplier escalates with each consecutive boundary up to <strong>{STREAK_OVERRIDE_MULTIPLIERS[6]}×</strong>.</div>
+                <div>Hit <strong>3 or more consecutive 4s or 6s</strong> to trigger the hat-trick streak bonus. The return escalates with each consecutive boundary up to <strong>{money(STREAK_OVERRIDE_MULTIPLIERS[6])}</strong>.</div>
               </div>
             </div>
 
@@ -174,19 +185,35 @@
                 class="pt-mode-btn pt-mode-btn--bonus"
                 class:active={paytableMode === 'bonus'}
                 onclick={() => paytableMode = 'bonus'}
-              >★ BONUS BUY</button>
+              >BONUS BUY</button>
             </div>
 
             {#if paytableMode === 'bonus'}
               <div class="bonus-badge">Powerplay mode — enhanced multipliers &amp; lower wicket rate</div>
             {/if}
 
-            <!-- Outcome rows -->
+            <!-- Bet amount — synced with the bet panel (returns update live) -->
+            <div class="pt-bet-setter">
+              <span class="pt-bet-label">YOUR BET</span>
+              <button class="pt-bet-adj" onclick={() => nudgeBetAmount(-1)} aria-label="Decrease bet">−</button>
+              <div class="pt-bet-input-wrap">
+                <span class="pt-bet-curr">{currSym}</span>
+                <input
+                  class="pt-bet-input"
+                  type="number" min="0.01" step="0.01"
+                  value={game.betAmount.toFixed(2)}
+                  oninput={handleBetInput}
+                  aria-label="Bet amount"
+                />
+              </div>
+              <button class="pt-bet-adj" onclick={() => nudgeBetAmount(1)} aria-label="Increase bet">+</button>
+            </div>
+
+            <!-- Outcome rows — return based on your bet -->
             <div class="pt-table">
               <div class="pt-header">
                 <span>OUTCOME</span>
-                <span>MULTIPLIER</span>
-                <span>CHANCE</span>
+                <span>RETURN</span>
               </div>
               {#each profile.outcomes as o}
                 {@const meta = OUTCOME_META[o.key]}
@@ -196,13 +223,9 @@
                   class:pt-row--dim={o.multiplier < 1}
                 >
                   <span class="pt-name">
-                    <span class="pt-icon">{meta?.icon}</span>
                     <span style="color:{meta?.color}">{meta?.label}</span>
                   </span>
-                  <span class="pt-mult" style="color:{meta?.color}">
-                    {o.multiplier > 0 ? `${o.multiplier.toFixed(2)}×` : 'LOSS'}
-                  </span>
-                  <span class="pt-prob">{(o.weight * 100).toFixed(1)}%</span>
+                  <span class="pt-mult" style="color:{meta?.color}">{money(o.multiplier)}</span>
                 </div>
               {/each}
             </div>
@@ -211,22 +234,16 @@
             <div class="step-label" style="margin-top:18px;">SKY BONUSES</div>
             <div class="sky-grid">
               <div class="sky-card">
-                <div class="sky-icon">🚀</div>
                 <div class="sky-name">JETPACK</div>
-                <div class="sky-prob">{(profile.sky.weights.jetpack * profile.sky.chance * 100).toFixed(2)}%</div>
-                <div class="sky-mult">10×</div>
+                <div class="sky-mult">{money(10)}</div>
               </div>
               <div class="sky-card">
-                <div class="sky-icon">✈️</div>
                 <div class="sky-name">SMALL PLANE</div>
-                <div class="sky-prob">{(profile.sky.weights.smallPlane * profile.sky.chance * 100).toFixed(2)}%</div>
-                <div class="sky-mult">10×</div>
+                <div class="sky-mult">{money(10)}</div>
               </div>
               <div class="sky-card sky-card--rare">
-                <div class="sky-icon">🛩️</div>
                 <div class="sky-name">BIG PLANE</div>
-                <div class="sky-prob">{(profile.sky.weights.bigPlane * profile.sky.chance * 100).toFixed(2)}%</div>
-                <div class="sky-mult rare-mult">100×</div>
+                <div class="sky-mult rare-mult">{money(100)}</div>
               </div>
             </div>
 
@@ -237,7 +254,7 @@
                 <div class="streak-card">
                   <div class="streak-num">{s.streak}+</div>
                   <div class="streak-label">in a row</div>
-                  <div class="streak-mult">{s.mult}×</div>
+                  <div class="streak-mult">{money(s.mult)}</div>
                 </div>
               {/each}
             </div>
@@ -247,11 +264,11 @@
             <div class="caps-row">
               <div class="cap-card">
                 <div class="cap-label">MAX PER BALL</div>
-                <div class="cap-val">{CAP_SINGLE_BALL_MULTIPLIER}×</div>
+                <div class="cap-val">{money(CAP_SINGLE_BALL_MULTIPLIER)}</div>
               </div>
               <div class="cap-card">
                 <div class="cap-label">MAX WIN CAP</div>
-                <div class="cap-val gold">{CAP_OVER_TOTAL_MULTIPLIER}×</div>
+                <div class="cap-val gold">{money(CAP_OVER_TOTAL_MULTIPLIER)}</div>
               </div>
             </div>
 
@@ -263,7 +280,6 @@
 
             <div class="feat-card feat-card--bonus">
               <div class="feat-header">
-                <span class="feat-icon">★</span>
                 <div>
                   <div class="feat-name">BONUS BUY</div>
                   <div class="feat-tag">POWERPLAY MODE</div>
@@ -310,15 +326,14 @@
 
             <div class="feat-card feat-card--ins">
               <div class="feat-header">
-                <span class="feat-icon">🛡</span>
                 <div>
-                  <div class="feat-name">INSURANCE</div>
+                  <div class="feat-name">FEATURE SPIN</div>
                   <div class="feat-tag">WICKET PROTECTION</div>
                 </div>
                 <div class="feat-cost">10% of bet (min 20)</div>
               </div>
               <div class="feat-body">
-                <p>Pay a small premium before the over. If a wicket falls at any point during that over, your original bet is refunded in full — you keep your accumulated multiplier winnings too.</p>
+                <p>Pay a small premium before the over. If a wicket falls at any point during that over, your original bet is refunded in full — you keep your accumulated winnings too.</p>
               </div>
               <div class="feat-stats">
                 <div class="feat-stat">
@@ -342,20 +357,19 @@
 
             <div class="feat-card feat-card--autobet">
               <div class="feat-header">
-                <span class="feat-icon">🔄</span>
                 <div>
                   <div class="feat-name">AUTOBET</div>
                   <div class="feat-tag">AUTOMATED PLAY</div>
                 </div>
               </div>
               <div class="feat-body">
-                <p>Automate consecutive rounds. Set a round count, stop-on-loss threshold, stop-on-win target, or exit multiplier. Use the speed selector to control pace from Slow to Turbo.</p>
+                <p>Automate consecutive rounds. Set a round count, stop-on-loss threshold, stop-on-win target, or exit target. Use the speed selector to control pace from Slow to Turbo.</p>
               </div>
               <div class="feat-stats">
-                <div class="feat-stat"><span class="fs-label">SLOW</span><span class="fs-val">🐢 4.5s</span></div>
-                <div class="feat-stat"><span class="fs-label">NORMAL</span><span class="fs-val">▶ 1.2s</span></div>
-                <div class="feat-stat"><span class="fs-label">FAST</span><span class="fs-val">▶▶ 0.5s</span></div>
-                <div class="feat-stat"><span class="fs-label">TURBO</span><span class="fs-val gold">⚡ 0.3s</span></div>
+                <div class="feat-stat"><span class="fs-label">SLOW</span><span class="fs-val">4.5s</span></div>
+                <div class="feat-stat"><span class="fs-label">NORMAL</span><span class="fs-val">1.2s</span></div>
+                <div class="feat-stat"><span class="fs-label">FAST</span><span class="fs-val">0.5s</span></div>
+                <div class="feat-stat"><span class="fs-label">TURBO</span><span class="fs-val gold">0.3s</span></div>
               </div>
             </div>
 
@@ -499,11 +513,6 @@
     display: flex;
     align-items: center;
     gap: 12px;
-  }
-
-  .gi-logo {
-    font-size: 2rem;
-    filter: drop-shadow(0 0 10px rgba(255, 200, 0, 0.4));
   }
 
   .gi-title {
@@ -692,7 +701,6 @@
     color: rgba(255,255,255,0.6);
   }
   .rn-row strong { color: rgba(255,255,255,0.9); }
-  .rn-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
 
   /* ── Paytable ────────────────────────────────────────────────────────────── */
   .pt-mode-toggle {
@@ -748,7 +756,7 @@
 
   .pt-header {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto;
     gap: 10px;
     padding: 8px 12px;
     background: rgba(255,255,255,0.04);
@@ -761,7 +769,7 @@
 
   .pt-row {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto;
     gap: 10px;
     align-items: center;
     padding: 9px 12px;
@@ -780,23 +788,81 @@
     font-weight: 800;
     letter-spacing: 0.04em;
   }
-  .pt-icon { font-size: 0.95rem; }
 
   .pt-mult {
     font-size: 0.80rem;
     font-weight: 900;
     font-variant-numeric: tabular-nums;
-    min-width: 52px;
+    min-width: 64px;
     text-align: right;
   }
 
-  .pt-prob {
-    font-size: 0.68rem;
-    font-variant-numeric: tabular-nums;
-    color: rgba(255,255,255,0.38);
-    min-width: 40px;
-    text-align: right;
+  /* Bet-amount setter (synced with the bet panel) */
+  .pt-bet-setter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 12px;
+    background: rgba(255, 200, 0, 0.06);
+    border: 1px solid rgba(255, 200, 0, 0.18);
   }
+  .pt-bet-label {
+    font-size: 0.48rem;
+    font-weight: 900;
+    letter-spacing: 0.18em;
+    color: rgba(255, 241, 163, 0.6);
+    text-transform: uppercase;
+    margin-right: auto;
+  }
+  .pt-bet-adj {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05);
+    color: #ffc800;
+    font-size: 1.1rem;
+    font-weight: 900;
+    line-height: 1;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    transition: filter 0.12s, border-color 0.15s;
+  }
+  .pt-bet-adj:hover { filter: brightness(1.3); border-color: rgba(255,200,0,0.4); }
+  .pt-bet-adj:active { filter: brightness(0.85); }
+
+  .pt-bet-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 5px 10px;
+    min-width: 96px;
+  }
+  .pt-bet-curr { font-size: 0.7rem; font-weight: 800; color: rgba(255,241,163,0.8); }
+  .pt-bet-input {
+    background: none;
+    border: none;
+    outline: none;
+    color: #fff;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    width: 100%;
+    text-align: right;
+    padding: 0;
+    appearance: textfield;
+    -webkit-appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  .pt-bet-input::-webkit-outer-spin-button,
+  .pt-bet-input::-webkit-inner-spin-button { appearance: none; -webkit-appearance: none; margin: 0; }
 
   /* Sky grid */
   .sky-grid {
@@ -821,10 +887,8 @@
     background: rgba(200,100,255,0.05);
   }
 
-  .sky-icon   { font-size: 1.5rem; }
   .sky-name   { font-size: 0.48rem; font-weight: 900; letter-spacing: 0.12em; color: rgba(255,255,255,0.4); text-transform: uppercase; }
-  .sky-prob   { font-size: 0.58rem; color: rgba(255,255,255,0.3); font-variant-numeric: tabular-nums; }
-  .sky-mult   { font-size: 1rem; font-weight: 900; color: #ffc800; text-shadow: 0 0 8px rgba(255,200,0,0.35); }
+  .sky-mult   { font-size: 0.95rem; font-weight: 900; color: #ffc800; text-shadow: 0 0 8px rgba(255,200,0,0.35); font-variant-numeric: tabular-nums; }
   .rare-mult  { color: #cc66ff; text-shadow: 0 0 8px rgba(180,80,255,0.4); }
 
   /* Streak */
@@ -869,7 +933,7 @@
   }
 
   .cap-label { font-size: 0.48rem; font-weight: 900; letter-spacing: 0.16em; color: rgba(255,255,255,0.3); text-transform: uppercase; }
-  .cap-val   { font-size: 1.4rem; font-weight: 900; color: rgba(255,255,255,0.85); }
+  .cap-val   { font-size: 1.1rem; font-weight: 900; color: rgba(255,255,255,0.85); font-variant-numeric: tabular-nums; }
   .cap-val.gold { color: #ffc800; text-shadow: 0 0 12px rgba(255,200,0,0.3); }
 
   /* ── Features ────────────────────────────────────────────────────────────── */
@@ -891,8 +955,6 @@
     border-bottom: 1px solid rgba(255,255,255,0.05);
     background: rgba(255,255,255,0.03);
   }
-
-  .feat-icon { font-size: 1.4rem; flex-shrink: 0; }
 
   .feat-name {
     font-family: 'Outfit', sans-serif;

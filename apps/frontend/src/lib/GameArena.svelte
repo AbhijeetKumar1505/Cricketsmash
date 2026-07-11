@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import MultiplierDisplay from "./ui/MultiplierDisplay.svelte";
-  import ScorecardOverlay from "./ui/ScorecardOverlay.svelte";
   import { game } from "../core/gameController.svelte.js";
 
   const ARENA_CURRENCY_SYMBOLS: Record<string, string> = {
@@ -32,12 +31,6 @@
       multiplier: number;
       key: number;
     },
-    scorecardData = null as null | {
-      multiplier: number;
-      betAmount: number;
-      profit: number;
-      wasWicket: boolean;
-    },
     /** Whether this result is a special event (boundary, wicket, sky hit). Non-special → compact badge. */
     isSpecialResult = true,
     /** Shorter hold for autobet (ms) before showing multiplier stage. */
@@ -54,12 +47,6 @@
       type: SkyObjectType;
       multiplier: number;
       key: number;
-    };
-    scorecardData?: null | {
-      multiplier: number;
-      betAmount: number;
-      profit: number;
-      wasWicket: boolean;
     };
     isSpecialResult?: boolean;
     resultStage1HoldMs?: number;
@@ -230,7 +217,7 @@
   ></div>
 
   <!-- ─── PERMANENT BROADCAST OVERLAYS (Svelte Layer) ─── -->
-  {#if !scorecardData && arenaStatus === "waiting"}
+  {#if arenaStatus === "waiting"}
     <div class="broadcast-overlay absolute inset-0 z-[50] pointer-events-none">
       <!-- Blue: badgelogo3D — top-left holographic badge -->
       <img src="/badgelogo3D_t.png" alt="Badge" class="bo-badge" />
@@ -299,7 +286,7 @@
   <!-- ─── Center Multiplier (z-60) ─── -->
   <!-- Only shows after the over-timeline has updated with the ball result
        (result stage 2), so the UX order is: bowl → hit → timeline → multiplier. -->
-  {#if !scorecardData && !isCrashed && arenaStatus === "result" && resultStage === 2}
+  {#if !isCrashed && accumulatedMult > 1 && arenaStatus === "result" && resultStage === 2}
     <div class="mult-center-anchor">
       <MultiplierDisplay value={accumulatedMult} status="hitting" pulseKey={rewardToast?.key ?? 0} />
     </div>
@@ -322,16 +309,8 @@
   {/if}
 
   <!-- OverTimeline removed: 1 ball = 1 bet, no over progress to track -->
-
-  <!-- ─── Result overlay (broadcast phase) ─── -->
-  {#if scorecardData}
-    <ScorecardOverlay
-      multiplier={scorecardData.multiplier}
-      betAmount={scorecardData.betAmount}
-      profit={scorecardData.profit}
-      wasWicket={scorecardData.wasWicket}
-    />
-  {/if}
+  <!-- Full-screen ScorecardOverlay removed: result shown by the small return toast
+       + the centered MultiplierDisplay (no screen-covering card, no red wicket). -->
 </div>
 
 <style>
@@ -622,15 +601,6 @@
     pointer-events: none;
   }
 
-  .over-tl-anchor {
-    position: absolute;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 60;
-    pointer-events: none;
-    white-space: nowrap;
-  }
 
   .payout-badge {
     position: absolute;

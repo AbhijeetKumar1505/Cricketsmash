@@ -1,8 +1,16 @@
 let ctx: AudioContext | null = null;
+/** Single master bus — every synthesized voice routes here so mute is global. */
+let masterGain: GainNode | null = null;
+let _muted = false;
 
 function getCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null;
-  if (!ctx) ctx = new AudioContext();
+  if (!ctx) {
+    ctx = new AudioContext();
+    masterGain = ctx.createGain();
+    masterGain.gain.value = _muted ? 0 : 1;
+    masterGain.connect(ctx.destination);
+  }
   return ctx;
 }
 
@@ -10,6 +18,47 @@ function resume(): AudioContext | null {
   const c = getCtx();
   if (c?.state === 'suspended') void c.resume();
   return c;
+}
+
+/** Output bus for all synthesized voices (master gain if ready, else destination). */
+function out(c: AudioContext): AudioNode {
+  return masterGain ?? c.destination;
+}
+
+// ── Global mute + looping background music ──────────────────────────────────────
+let bgAudio: HTMLAudioElement | null = null;
+
+/** Mute/unmute ALL audio — synthesized SFX (via master gain) and background music. */
+export function setMuted(muted: boolean): void {
+  _muted = muted;
+  if (masterGain && ctx) {
+    masterGain.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.015);
+  }
+  if (bgAudio) bgAudio.muted = muted;
+}
+
+export function isMuted(): boolean {
+  return _muted;
+}
+
+/** Start (or resume) the looping background track. Safe to call repeatedly. */
+export function startBackgroundMusic(): void {
+  if (typeof window === 'undefined') return;
+  if (!bgAudio) {
+    bgAudio = new Audio('/gameBGsound.mpeg');
+    bgAudio.loop = true;
+    bgAudio.volume = 0.25;
+    bgAudio.muted = _muted;
+  }
+  // Autoplay may be blocked until a user gesture — ignore the rejection.
+  void bgAudio.play().catch(() => {});
+}
+
+export function stopBackgroundMusic(): void {
+  if (bgAudio) {
+    bgAudio.pause();
+    bgAudio.currentTime = 0;
+  }
 }
 
 /** UI blip */
@@ -22,7 +71,7 @@ export function playBlip(freq: number, duration = 0.06, gain = 0.08): void {
   o.frequency.value = freq;
   g.gain.value = gain;
   o.connect(g);
-  g.connect(c.destination);
+  g.connect(out(c));
   o.start();
   o.stop(c.currentTime + duration);
 }
@@ -39,7 +88,7 @@ export function playClick(): void {
   g.gain.setValueAtTime(0.1, c.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.06);
   o.connect(g);
-  g.connect(c.destination);
+  g.connect(out(c));
   o.start();
   o.stop(c.currentTime + 0.07);
 }
@@ -50,7 +99,7 @@ export function playBetConfirm(): void {
   if (!c) return;
   const master = c.createGain();
   master.gain.value = 0.12;
-  master.connect(c.destination);
+  master.connect(out(c));
   [440, 660].forEach((f, i) => {
     const o = c.createOscillator();
     const g = c.createGain();
@@ -78,7 +127,7 @@ export function playCrack(): void {
   g.gain.setValueAtTime(0.12, c.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.05);
   o.connect(g);
-  g.connect(c.destination);
+  g.connect(out(c));
   o.start();
   o.stop(c.currentTime + 0.055);
 
@@ -91,7 +140,7 @@ export function playCrack(): void {
   bassG.gain.setValueAtTime(0.18, c.currentTime);
   bassG.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.10);
   bass.connect(bassG);
-  bassG.connect(c.destination);
+  bassG.connect(out(c));
   bass.start();
   bass.stop(c.currentTime + 0.12);
 }
@@ -102,7 +151,7 @@ export function playWicketClatter(): void {
   if (!c) return;
   const master = c.createGain();
   master.gain.value = 0.35;
-  master.connect(c.destination);
+  master.connect(out(c));
 
   const tri = c.createOscillator();
   const triG = c.createGain();
@@ -154,7 +203,7 @@ export function playCrowdSwell(intensity: 'boundary' | 'mild'): void {
   g.gain.setValueAtTime(0, c.currentTime);
   g.gain.linearRampToValueAtTime(intensity === 'boundary' ? 0.12 : 0.06, c.currentTime + 0.08);
   g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
-  src.connect(lp); lp.connect(g); g.connect(c.destination);
+  src.connect(lp); lp.connect(g); g.connect(out(c));
   src.start(); src.stop(c.currentTime + dur);
 }
 
@@ -175,7 +224,7 @@ export function playCrowdGroan(): void {
   const g = c.createGain();
   g.gain.setValueAtTime(0.08, c.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
-  src.connect(lp); lp.connect(g); g.connect(c.destination);
+  src.connect(lp); lp.connect(g); g.connect(out(c));
   src.start(); src.stop(c.currentTime + dur);
 }
 
@@ -189,7 +238,7 @@ export function playTick(multiplier: number): void {
   o.frequency.value = 800 + Math.min(2200, multiplier * 45);
   g.gain.setValueAtTime(0.045, c.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.035);
-  o.connect(g); g.connect(c.destination);
+  o.connect(g); g.connect(out(c));
   o.start(); o.stop(c.currentTime + 0.04);
 }
 
@@ -201,7 +250,7 @@ export function playMilestone(tier: 1 | 2 | 3): void {
   const c = resume();
   if (!c) return;
   const master = c.createGain();
-  master.connect(c.destination);
+  master.connect(out(c));
 
   if (tier === 1) {
     // Single bright ping
@@ -289,7 +338,7 @@ export function startTensionHum(): void {
   osc2.connect(gain2);
   gain2.connect(lp);
   lp.connect(gain);
-  gain.connect(c.destination);
+  gain.connect(out(c));
   osc.start();
   osc2.start();
   tensionNode = { osc, gain, osc2 };
@@ -326,7 +375,7 @@ export function playCashoutWin(): void {
   const master = c.createGain();
   master.gain.setValueAtTime(0.14, c.currentTime);
   master.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 1.4);
-  master.connect(c.destination);
+  master.connect(out(c));
 
   freqs.forEach((f, i) => {
     const o = c.createOscillator();
@@ -387,7 +436,7 @@ export function startCrowdMurmur(): void {
 
   src.connect(lp);
   lp.connect(gain);
-  gain.connect(c.destination);
+  gain.connect(out(c));
 
   src.start();
   crowdMurmur = { src, gain, lp };
@@ -429,7 +478,7 @@ export function playCrowdShout(intensity: number): void {
   gain.gain.linearRampToValueAtTime(0.12 * intensity, c.currentTime + 0.05);
   gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + dur);
 
-  src.connect(bp); bp.connect(gain); gain.connect(c.destination);
+  src.connect(bp); bp.connect(gain); gain.connect(out(c));
   src.start(); src.stop(c.currentTime + dur);
 }
 
@@ -440,7 +489,7 @@ export function playVictoryFanfare(): void {
   if (!c) return;
   const master = c.createGain();
   master.gain.value = 0.2;
-  master.connect(c.destination);
+  master.connect(out(c));
 
   const notes = [
     { f: 523.25, t: 0.0 }, // C5
@@ -489,7 +538,7 @@ export function playTickerUpdate(): void {
   o.frequency.linearRampToValueAtTime(1800, c.currentTime + 0.04);
   g.gain.setValueAtTime(0.05, c.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.04);
-  o.connect(g); g.connect(c.destination);
+  o.connect(g); g.connect(out(c));
   o.start(); o.stop(c.currentTime + 0.05);
 }
 
@@ -512,7 +561,7 @@ export function playWinTrin(multiplier = 1): void {
     g.gain.linearRampToValueAtTime(n.gain, now + n.delay + 0.015);
     g.gain.exponentialRampToValueAtTime(0.001, now + n.delay + 0.75);
     osc.connect(g);
-    g.connect(c.destination);
+    g.connect(out(c));
     osc.start(now + n.delay);
     osc.stop(now + n.delay + 0.76);
   }

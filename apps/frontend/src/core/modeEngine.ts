@@ -59,20 +59,6 @@ function pickBowler(rng: () => number): BowlerType {
 }
 
 /**
- * God Mode: every hit becomes a six. Wickets pass through unchanged.
- */
-export function applyGodModeOverrides(deliveries: Delivery[]): Delivery[] {
-  return deliveries.map(d => {
-    if (d.outcome.kind === 'wicket') return d;
-    return {
-      ...d,
-      outcome: { kind: 'runs' as const, runs: 6 as CricketRuns, multiplier: d.outcome.multiplier },
-      shotType: 'loft' as ShotType,
-    };
-  });
-}
-
-/**
  * Expand one Stake RGS `payoutMultiplier` into a single Delivery.
  * Always uses POWERPLAY (single-ball) decomposition.
  */

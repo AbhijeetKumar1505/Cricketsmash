@@ -152,6 +152,13 @@
 
   function handleBonusBuy() {
     if (game.betActive || game.sessionActive) return;
+    // Already armed → clicking disarms (no balance checks needed).
+    if (game.bonusBuyArmed) {
+      placeBonusBuy();
+      playBlip(360, 0.08);
+      showBonusMenu = false;
+      return;
+    }
     if (!game.bonusBuyAvailable) {
       game.bonusBuyAlert = 'Bonus Buy unavailable';
       scheduleBonusAlertClear();
@@ -162,7 +169,7 @@
       scheduleBonusAlertClear();
       return;
     }
-    void placeBonusBuy();
+    placeBonusBuy();
     playBlip(800, 0.1);
     showBonusMenu = false;
   }
@@ -191,12 +198,13 @@
 {#if game.winToast}
   <div class="win-toast"
        class:win-toast--mega={game.winToast.multiplier > 3}
+       class:win-toast--flat={game.winToast.multiplier <= 1}
        transition:fly={{ y: -20, duration: 350, easing: cubicOut }}
-       onintroend={() => playWinTrin(game.winToast?.multiplier ?? 1)}>
+       onintroend={() => { if ((game.winToast?.multiplier ?? 0) > 1) playWinTrin(game.winToast?.multiplier ?? 1); }}>
     {#if game.winToast.multiplier > 3}
       <span class="win-mega">MEGA WIN</span>
     {/if}
-    <span class="win-amt">+{currSymbol}{game.winToast.amount.toFixed(currDecimals)}</span>
+    <span class="win-amt">{game.winToast.multiplier > 1 ? '+' : ''}{currSymbol}{game.winToast.amount.toFixed(currDecimals)}</span>
   </div>
 {/if}
 
@@ -288,13 +296,14 @@
         >
           <button
             class="bonus-opt"
-            class:is-disabled={!canBonusBuy}
+            class:is-active={game.bonusBuyArmed}
+            class:is-disabled={!canBonusBuy && !game.bonusBuyArmed}
             onclick={handleBonusBuy}
-            aria-label="Bonus Buy"
+            aria-label={game.bonusBuyArmed ? 'Disarm bonus buy' : 'Bonus Buy'}
           >
             <span class="opt-icon">★</span>
             <span class="opt-text">
-              <span class="opt-title">Bonus Buy</span>
+              <span class="opt-title">Bonus Buy{game.bonusBuyArmed ? ' · ARMED' : ''}</span>
               <span class="opt-sub">Powerplay over · +{currSymbol}{bonusBuySurcharge.toFixed(currDecimals)}</span>
             </span>
           </button>
@@ -303,11 +312,11 @@
             class:is-active={game.insuranceActive}
             class:is-disabled={!canInsurance && !game.insuranceActive}
             onclick={handleInsurance}
-            aria-label={game.insuranceActive ? 'Deactivate insurance' : 'Insurance Buy'}
+            aria-label={game.insuranceActive ? 'Deactivate feature spin' : 'Feature Spin'}
           >
             <span class="opt-icon">🛡</span>
             <span class="opt-text">
-              <span class="opt-title">Insurance Buy{game.insuranceActive ? ' · ON' : ''}</span>
+              <span class="opt-title">Feature Spin{game.insuranceActive ? ' · ON' : ''}</span>
               <span class="opt-sub">Refund on wicket · {currSymbol}{insuranceCost.toFixed(currDecimals)}</span>
             </span>
           </button>
@@ -317,15 +326,15 @@
       <button
         class="bonus-main"
         class:menu-open={showBonusMenu}
-        class:has-active={game.insuranceActive}
+        class:has-active={game.insuranceActive || game.bonusBuyArmed}
         onclick={toggleBonusMenu}
         aria-haspopup="menu"
         aria-expanded={showBonusMenu}
-        aria-label="Bonus and insurance options"
+        aria-label="Bonus and feature options"
       >
         <span class="bonus-main-icon">★</span>
         <span class="bonus-main-label">BONUS</span>
-        {#if game.insuranceActive}<span class="bonus-main-dot" aria-hidden="true"></span>{/if}
+        {#if game.insuranceActive || game.bonusBuyArmed}<span class="bonus-main-dot" aria-hidden="true"></span>{/if}
       </button>
     </div>
 
@@ -820,6 +829,13 @@
     align-items: center;
   }
   .win-toast--mega .win-amt { color: #ffe27a; }
+
+  /* Dot / wicket — neutral return, no green/red, no glow */
+  .win-toast--flat { border-color: rgba(255, 241, 163, 0.30); }
+  .win-toast--flat .win-amt {
+    color: rgba(255, 241, 205, 0.88);
+    font-weight: 800;
+  }
 
   /* ── Bonus buy alert pill ──────────────────────────────────────────────── */
   .bb-alert {
